@@ -50,7 +50,7 @@ func TestFocusWatchForwardDistinguishesUnavailableFromAdmitted(t *testing.T) {
 // The pane writes an invisible update before each echo, as Codex, Muse and
 // Oh My Pi do.
 func TestFocusWatchEchoesAQuietPaneAtOnce(t *testing.T) {
-	driver, id, arrivals, _ := startFocusArrivalWatch(t)
+	driver, id, arrivals, watch := startFocusArrivalWatch(t)
 	echo := `bash -c 'echo $((6*7))ready; while IFS= read -rsn1 key; do printf "\033[?25h"; sleep 0.01; printf "<%s>" "$key"; done'`
 	if err := driver.SendText(id, echo); err != nil {
 		t.Fatalf("SendText: %v", err)
@@ -58,7 +58,21 @@ func TestFocusWatchEchoesAQuietPaneAtOnce(t *testing.T) {
 
 	waitFocusArrival(t, arrivals, "42ready")
 
-	// Use the fastest attempt to tolerate scheduler delays on busy hosts.
+	// The echo's frame comes a capture gap after the invisible update's frame
+	// when it is not held and a frame budget after when it is, plus one
+	// capture either way. That capture is timed beside each attempt and taken
+	// off, so the bound sits halfway between the two however slow the host.
+	target := tmux.PaneTarget(id)
+	captureTime := func() time.Duration {
+		start := time.Now()
+		for _, command := range []string{"capture-pane -p -e -t " + target,
+			`display-message -p -t ` + target + ` "` + paneStateFormat + `"`} {
+			if available, err := watch.Forward(command); !available || err != nil {
+				t.Fatalf("timing a capture: available %v, err %v", available, err)
+			}
+		}
+		return time.Since(start)
+	}
 	fastest := time.Hour
 	for attempt := range 5 {
 		time.Sleep(2 * frameBudget)
@@ -70,45 +84,105 @@ func TestFocusWatchEchoesAQuietPaneAtOnce(t *testing.T) {
 		if err := driver.SendRaw("send-keys -t " + tmux.PaneTarget(id) + " -l " + key); err != nil {
 			t.Fatalf("send-keys: %v", err)
 		}
-		sent := time.Now()
-		got := waitFocusArrival(t, arrivals, token)
-		fastest = min(fastest, got.at.Sub(sent))
+		gap := echoAfterUpdate(t, arrivals, token, time.Now())
+		fastest = min(fastest, gap-captureTime())
 	}
-	if fastest >= frameBudget/2 {
-		t.Fatalf("fastest echo took %v, want under %v", fastest, frameBudget/2)
+	if bound := (captureGap + frameBudget) / 2; fastest >= bound {
+		t.Fatalf("echo waited %v after the invisible update's frame, want under %v", fastest, bound)
 	}
 }
 
-func TestFocusWatchSpacesAStreamByTheFrameBudget(t *testing.T) {
-	driver, id, sends, _ := startFocusArrivalWatch(t)
+// echoAfterUpdate is how long after the previous frame, or after sent when
+// there was none, the frame showing token arrived.
+func echoAfterUpdate(t *testing.T, arrivals <-chan focusArrival, token string, sent time.Time) time.Duration {
+	t.Helper()
+	previous := sent
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-arrivals:
+			if strings.Contains(got.preview, token) {
+				return got.at.Sub(previous)
+			}
+			previous = got.at
+		case <-deadline:
+			t.Fatalf("no preview containing %q", token)
+		}
+	}
+}
 
-	waitFocusArrival(t, sends, "")
+// A focused pane streams at the frame budget; one only previewed beside the
+// list streams on the live tick.
+func TestFocusWatchSpacesAStreamByItsPace(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		fast bool
+		gap  time.Duration
+	}{
+		{"focused", true, frameBudget},
+		{"previewed", false, 300 * time.Millisecond},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			driver, id, sends, watch := startFocusArrivalWatch(t)
+			watch.Pace(tt.fast)
 
-	if err := driver.SendText(id, "for i in $(seq 1 300); do echo line$i; sleep 0.005; done"); err != nil {
+			waitFocusArrival(t, sends, "")
+
+			if err := driver.SendText(id, "for i in $(seq 1 600); do echo line$i; sleep 0.005; done"); err != nil {
+				t.Fatalf("SendText: %v", err)
+			}
+			waitFocusArrival(t, sends, "line1")
+			var changes []time.Time
+			shown := ""
+			collect := time.After(6 * tt.gap)
+			for collecting := true; collecting; {
+				select {
+				case got := <-sends:
+					if got.preview != shown {
+						shown = got.preview
+						changes = append(changes, got.at)
+					}
+				case <-collect:
+					collecting = false
+				}
+			}
+			if len(changes) < 3 {
+				t.Fatalf("stream changed the preview %d times in %v, want at least 3", len(changes), 6*tt.gap)
+			}
+			for index := 1; index < len(changes); index++ {
+				if gap := changes[index].Sub(changes[index-1]); gap < tt.gap {
+					t.Fatalf("previews %d and %d came %v apart, want at least %v", index-1, index, gap, tt.gap)
+				}
+			}
+		})
+	}
+}
+
+// Focusing a previewed pane takes the frame budget at once instead of
+// waiting out the live tick the last capture set.
+func TestFocusWatchPaceChangeWakesAPendingCapture(t *testing.T) {
+	driver, id, arrivals, watch := startFocusArrivalWatch(t)
+	if err := driver.SendText(id, "for i in $(seq 1 3000); do echo line$i; sleep 0.005; done"); err != nil {
 		t.Fatalf("SendText: %v", err)
 	}
-	waitFocusArrival(t, sends, "line1")
-	var changes []time.Time
-	shown := ""
-	collect := time.After(time.Second)
-	for collecting := true; collecting; {
-		select {
-		case got := <-sends:
-			if got.preview != shown {
-				shown = got.preview
-				changes = append(changes, got.at)
-			}
-		case <-collect:
-			collecting = false
+	waitFocusArrival(t, arrivals, "line1")
+	liveTick := 300 * time.Millisecond
+	fastest := time.Hour
+	for range 3 {
+		watch.Pace(false)
+		time.Sleep(liveTick + frameBudget)
+		for len(arrivals) > 0 {
+			<-arrivals
 		}
+		previewed := waitFocusArrival(t, arrivals, "line")
+		// Let the stream's next event start the wait on the live tick.
+		time.Sleep(frameBudget / 2)
+		watch.Pace(true)
+		focused := waitFocusArrival(t, arrivals, "line")
+		fastest = min(fastest, focused.at.Sub(previewed.at))
 	}
-	if len(changes) < 5 {
-		t.Fatalf("stream changed the preview %d times in a second, want at least 5", len(changes))
-	}
-	for index := 1; index < len(changes); index++ {
-		if gap := changes[index].Sub(changes[index-1]); gap < frameBudget {
-			t.Fatalf("previews %d and %d came %v apart, want at least %v", index-1, index, gap, frameBudget)
-		}
+	if bound := (frameBudget + liveTick) / 2; fastest >= bound {
+		t.Fatalf("first focused frame came %v after the last previewed one, want under %v", fastest, bound)
 	}
 }
 
@@ -200,6 +274,7 @@ func startFocusArrivalWatch(t *testing.T) (*tmux.Driver, string, <-chan focusArr
 		}
 	})
 	t.Cleanup(watch.Close)
+	watch.Pace(true)
 	watch.SetFocus(id)
 	return driver, id, arrivals, watch
 }

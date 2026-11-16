@@ -41,6 +41,25 @@ func TestParseVersion(t *testing.T) {
 	}
 }
 
+func TestIsRelease(t *testing.T) {
+	cases := map[string]bool{
+		"0.47.1":                     true,
+		"v0.47.1":                    true,
+		"dev":                        false,
+		"v0.47.1-10-g1656b508":       false,
+		"v0.47.1-10-g1656b508-dirty": false,
+		"v0.47.1-0-g1656b508":        false,
+		"1656b508":                   false,
+		"v0.47.2-0.20261106234132-2bf7711b3b5d+dirty": false,
+		"": false,
+	}
+	for in, want := range cases {
+		if got := IsRelease(in); got != want {
+			t.Errorf("IsRelease(%q) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestVersionComparison(t *testing.T) {
 	if !Newer("v0.9.0", "v0.8.2") {
 		t.Fatal("newer patch should compare greater")
@@ -64,10 +83,10 @@ func TestExtractChangesHumanizesGeneratedNotes(t *testing.T) {
 		"Project introduction",
 		"",
 		"## What's Changed",
-		"* fix(groups): make group creation immediate and reliable by @YoanWai in https://github.com/YoanWai/agent-manager/pull/191",
-		"* feat(config): add Pi as a built-in tool by @steveprentice in https://github.com/YoanWai/agent-manager/pull/201",
-		"* chore(deps): bump gopsutil by @dependabot[bot] in https://github.com/YoanWai/agent-manager/pull/210",
-		"* docs(readme): add a badge by @YoanWai in https://github.com/YoanWai/agent-manager/pull/211",
+		"* fix(groups): make group creation immediate and reliable by @YoanWai in https://github.com/wainmann/agent-manager/pull/191",
+		"* feat(config): add Pi as a built-in tool by @steveprentice in https://github.com/wainmann/agent-manager/pull/201",
+		"* chore(deps): bump gopsutil by @dependabot[bot] in https://github.com/wainmann/agent-manager/pull/210",
+		"* docs(readme): add a badge by @YoanWai in https://github.com/wainmann/agent-manager/pull/211",
 		"- feat(ui): add a [message browser](https://example.com) with `scrolling`",
 		"- feat(mcp-editor): expose tool capabilities",
 		"",
@@ -77,10 +96,12 @@ func TestExtractChangesHumanizesGeneratedNotes(t *testing.T) {
 
 	changes, total := extractChanges(body)
 	want := []Change{
-		{Kind: KindFix, Text: "Groups: Make group creation immediate and reliable"},
-		{Kind: KindFeature, Text: "Config: Add Pi as a built-in tool", Author: "@steveprentice"},
-		{Kind: KindFeature, Text: "UI: Add a message browser with scrolling"},
-		{Kind: KindFeature, Text: "MCP editor: Expose tool capabilities"},
+		{Kind: KindFix, Scope: "Groups", Text: "Make group creation immediate and reliable", Author: "@YoanWai"},
+		{Kind: KindFeature, Scope: "Config", Text: "Add Pi as a built-in tool", Author: "@steveprentice"},
+		{Kind: KindOther, Scope: "Deps", Text: "Bump gopsutil"},
+		{Kind: KindOther, Scope: "Readme", Text: "Add a badge", Author: "@YoanWai"},
+		{Kind: KindFeature, Scope: "UI", Text: "Add a message browser with scrolling"},
+		{Kind: KindFeature, Scope: "MCP editor", Text: "Expose tool capabilities"},
 	}
 	if total != len(want) || !slices.Equal(changes, want) {
 		t.Fatalf("extractChanges() = %+v total %d, want %+v", changes, total, want)
@@ -127,11 +148,11 @@ func TestBetweenReturnsEverySkippedReleaseOldestFirst(t *testing.T) {
 func TestCheckFetchesStableCatalogAndFindsLatest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, `[
-			{"tag_name":"v0.9.0","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v0.9.0","body":"## What's Changed\n* fix(ui): newest","draft":false,"prerelease":false},
-			{"tag_name":"v0.11.0","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v0.11.0","body":"## What's Changed\n* feat(ui): actual latest","draft":false,"prerelease":false},
-			{"tag_name":"v0.12.0-rc.1","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v0.12.0-rc.1","body":"","draft":false,"prerelease":true},
-			{"tag_name":"v99.0.0","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v99.0.0","body":"","draft":true,"prerelease":false},
-			{"tag_name":"garbage","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/garbage","body":"","draft":false,"prerelease":false}
+			{"tag_name":"v0.9.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.9.0","body":"## What's Changed\n* fix(ui): newest","draft":false,"prerelease":false},
+			{"tag_name":"v0.11.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.11.0","body":"## What's Changed\n* feat(ui): actual latest","draft":false,"prerelease":false},
+			{"tag_name":"v0.12.0-rc.1","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.12.0-rc.1","body":"","draft":false,"prerelease":true},
+			{"tag_name":"v99.0.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v99.0.0","body":"","draft":true,"prerelease":false},
+			{"tag_name":"garbage","html_url":"https://github.com/wainmann/agent-manager/releases/tag/garbage","body":"","draft":false,"prerelease":false}
 		]`)
 	}))
 	defer server.Close()
@@ -144,14 +165,53 @@ func TestCheckFetchesStableCatalogAndFindsLatest(t *testing.T) {
 	if result.Latest != "v0.11.0" || len(result.Releases) != 2 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
-	if got := result.Releases[0].Changes; len(got) != 1 || got[0] != (Change{Kind: KindFeature, Text: "UI: Actual latest"}) {
+	if got := result.Releases[0].Changes; len(got) != 1 || got[0] != (Change{Kind: KindFeature, Scope: "UI", Text: "Actual latest"}) {
 		t.Fatalf("release changes = %+v", got)
 	}
 }
 
+func TestCleanChangeKeepsEveryTypeAndSplitsTheScope(t *testing.T) {
+	cases := map[string]Change{
+		"feat(ui): first-run setup by @YoanWai in https://github.com/wainmann/agent-manager/pull/919":            {Kind: KindFeature, Scope: "UI", Text: "First-run setup", Author: "@YoanWai"},
+		"perf(tmux): one spawn per poll by @a in https://github.com/wainmann/agent-manager/pull/1":               {Kind: KindFix, Scope: "Tmux", Text: "One spawn per poll", Author: "@a"},
+		"test(e2e): await preview redraws by @ribeirojose in https://github.com/wainmann/agent-manager/pull/862": {Kind: KindOther, Scope: "E2E", Text: "Await preview redraws", Author: "@ribeirojose"},
+		"ci: run staticcheck by @YoanWai in https://github.com/wainmann/agent-manager/pull/910":                  {Kind: KindOther, Text: "Run staticcheck", Author: "@YoanWai"},
+		"Untyped line by @b in https://github.com/wainmann/agent-manager/pull/2":                                 {Kind: KindOther, Text: "Untyped line", Author: "@b"},
+	}
+	for bullet, want := range cases {
+		got, ok := cleanChange(bullet)
+		if !ok || got != want {
+			t.Errorf("cleanChange(%q) = %+v, %v; want %+v", bullet, got, ok, want)
+		}
+	}
+}
+
+func TestFetchCarriesThePublishDate(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `[{"tag_name":"v0.50.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.50.0","body":"","published_at":"2026-10-30T15:55:28Z"}]`)
+	}))
+	defer server.Close()
+	defer swapReleasesURL(server.URL)()
+
+	releases, _, _, err := fetchReleases(context.Background(), "", requestBudget)
+	if err != nil || len(releases) != 1 {
+		t.Fatalf("releases=%+v err=%v", releases, err)
+	}
+	if want := time.Date(2026, 10, 30, 15, 55, 28, 0, time.UTC); !releases[0].PublishedAt.Equal(want) {
+		t.Fatalf("PublishedAt = %v, want %v", releases[0].PublishedAt, want)
+	}
+}
+
 func TestCheckDevBuildSkips(t *testing.T) {
-	if result, err := Check(context.Background(), t.TempDir(), "dev"); err != nil || len(result.Releases) != 0 {
-		t.Fatalf("dev build should skip: %+v, %v", result, err)
+	for _, version := range []string{"dev", "v0.0.1-10-g1656b508-dirty"} {
+		dir := t.TempDir()
+		seedCache(t, dir, cache{CheckedAt: time.Now(), Releases: []Release{{Version: "v9.0.0"}}})
+		if result, err := Check(context.Background(), dir, version); err != nil || len(result.Releases) != 0 {
+			t.Fatalf("%s build should skip: %+v, %v", version, result, err)
+		}
+		if result := Cached(dir, version); result.Latest != "" {
+			t.Fatalf("%s build was offered %s", version, result.Latest)
+		}
 	}
 }
 
@@ -200,7 +260,7 @@ func TestCatalogBehindTheRunningBuildRefetches(t *testing.T) {
 	}
 	// The notice is built from these lines, so reaching the release is only
 	// half of it: an entry with no changes leaves it as empty as before.
-	if got := result.Releases[0].Changes; len(got) != 1 || got[0].Text != "UI: Refreshed" {
+	if got := result.Releases[0].Changes; len(got) != 1 || got[0].Scope != "UI" || got[0].Text != "Refreshed" {
 		t.Fatalf("changes are %+v, want the fetched release's own", got)
 	}
 	if result.Latest != "" {
@@ -357,7 +417,7 @@ func TestCatalogFromAnotherParserIsRefetchedWithoutItsETag(t *testing.T) {
 		if got := r.Header.Get("If-None-Match"); got != "" {
 			t.Errorf("If-None-Match = %q, want none: a not-modified answer would keep the other parse", got)
 		}
-		fmt.Fprint(w, `[{"tag_name":"v0.40.0","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v0.40.0","body":"## What's Changed\n* fix(ui): reparsed"}]`)
+		fmt.Fprint(w, `[{"tag_name":"v0.40.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.40.0","body":"## What's Changed\n* fix(ui): reparsed"}]`)
 	}))
 	defer server.Close()
 	defer swapReleasesURL(server.URL)()
@@ -366,7 +426,7 @@ func TestCatalogFromAnotherParserIsRefetchedWithoutItsETag(t *testing.T) {
 	if err != nil || calls.Load() != 1 {
 		t.Fatalf("err=%v calls=%d, want one full fetch despite the fresh timestamp", err, calls.Load())
 	}
-	if got := result.Releases[0].Changes[0].Text; got != "UI: Reparsed" {
+	if got := result.Releases[0].Changes[0].Text; got != "Reparsed" {
 		t.Fatalf("changes = %q, want this build's parse", got)
 	}
 }
@@ -380,7 +440,7 @@ func TestLegacyCatalogSeedsTheFirstPaint(t *testing.T) {
 		t.Fatalf("seed = %+v", seeded)
 	}
 	newest := seeded.Releases[0]
-	if !slices.Equal(newest.Highlights, []string{"Pickers are here"}) || !slices.Equal(newest.Thanks, []string{"@someone asked (#1)"}) {
+	if !slices.Equal(newest.Highlights, []Highlight{{Text: "Pickers are here"}}) || !slices.EqualFunc(newest.Thanks, []Thanks{{Handle: "@someone", Group: ThanksBuilt, Text: "asked", Refs: []string{"#1"}}}, sameThanks) {
 		t.Fatalf("the authored sections must carry over: %+v", newest)
 	}
 	if !slices.Equal(newest.Changes, []Change{{Kind: KindOther, Text: "UI: A feature · @someone"}}) || newest.TotalChanges != 1 {
@@ -396,7 +456,7 @@ func TestLegacyCatalogSeedsTheFirstPaint(t *testing.T) {
 		if got := r.Header.Get("If-None-Match"); got != "" {
 			t.Errorf("If-None-Match = %q, want none", got)
 		}
-		fmt.Fprint(w, `[{"tag_name":"v0.40.0","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v0.40.0","body":"## What's Changed\n* feat(ui): fetched"}]`)
+		fmt.Fprint(w, `[{"tag_name":"v0.40.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.40.0","body":"## What's Changed\n* feat(ui): fetched"}]`)
 	}))
 	defer server.Close()
 	defer swapReleasesURL(server.URL)()
@@ -428,10 +488,43 @@ func TestFailedFetchKeepsTheLegacySeedOnScreen(t *testing.T) {
 	}
 }
 
+func TestParserOneCatalogPaintsUntilItIsRefetched(t *testing.T) {
+	dir := t.TempDir()
+	seedFile(t, dir, cacheFile, parserOneCatalogJSON)
+
+	cached := Cached(dir, "v0.44.0")
+	if cached.Latest != "v0.45.0" || len(cached.Releases) != 1 {
+		t.Fatalf("a parser 1 catalog must still paint: %+v", cached)
+	}
+	release := cached.Releases[0]
+	if !slices.Equal(release.Highlights, []Highlight{{Text: "`agent-manager export` and `import` move settings to another machine."}}) {
+		t.Fatalf("highlights = %+v", release.Highlights)
+	}
+	wantThanks := []Thanks{{Handle: "@subbeh", Group: ThanksBuilt, Text: "built environment profiles", Refs: []string{"#832", "#834"}}}
+	if !slices.EqualFunc(release.Thanks, wantThanks, sameThanks) {
+		t.Fatalf("thanks = %+v, want %+v", release.Thanks, wantThanks)
+	}
+
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if got := r.Header.Get("If-None-Match"); got != "" {
+			t.Errorf("If-None-Match = %q, want none: a not-modified answer would keep the parser 1 shape", got)
+		}
+		fmt.Fprint(w, `[{"tag_name":"v0.45.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.45.0","body":"## What's Changed\n* feat(ui): reparsed"}]`)
+	}))
+	defer server.Close()
+	defer swapReleasesURL(server.URL)()
+
+	if _, err := Check(context.Background(), dir, "v0.44.0"); err != nil || calls.Load() != 1 {
+		t.Fatalf("err=%v calls=%d, want one full fetch", err, calls.Load())
+	}
+}
+
 func testRelease(version string, changes ...string) Release {
 	release := Release{
 		Version:      version,
-		URL:          "https://github.com/YoanWai/agent-manager/releases/tag/" + version,
+		URL:          "https://github.com/wainmann/agent-manager/releases/tag/" + version,
 		TotalChanges: len(changes),
 	}
 	for _, text := range changes {
@@ -479,16 +572,23 @@ func seedFile(t *testing.T, dir, name, content string) {
 const legacyCatalogJSON = `{
 	"checked_at": "2099-01-01T00:00:00Z",
 	"latest": "v0.40.0",
-	"url": "https://github.com/YoanWai/agent-manager/releases/tag/v0.40.0",
+	"url": "https://github.com/wainmann/agent-manager/releases/tag/v0.40.0",
 	"etag": "\"legacy-1\"",
 	"releases": [
-		{"version": "v0.40.0", "url": "https://github.com/YoanWai/agent-manager/releases/tag/v0.40.0",
+		{"version": "v0.40.0", "url": "https://github.com/wainmann/agent-manager/releases/tag/v0.40.0",
 		 "highlights": ["Pickers are here"], "thanks": ["@someone asked (#1)"],
 		 "changes": ["UI: A feature · @someone"], "total_changes": 1},
-		{"version": "v0.39.0", "url": "https://github.com/YoanWai/agent-manager/releases/tag/v0.39.0",
+		{"version": "v0.39.0", "url": "https://github.com/wainmann/agent-manager/releases/tag/v0.39.0",
 		 "changes": ["UI: Older"], "total_changes": 1}
 	]
 }`
+
+const parserOneCatalogJSON = `{"checked_at":"2099-01-01T00:00:00+02:00","parser":1,"etag":"W/\"parser-1\"","releases":[` +
+	`{"version":"v0.45.0","url":"https://github.com/wainmann/agent-manager/releases/tag/v0.45.0",` +
+	`"headline":"A first-run setup","summary":"A fresh install now opens a short setup.",` +
+	"\"highlights\":[\"`agent-manager export` and `import` move settings to another machine.\"]," +
+	`"thanks":["@subbeh built environment profiles (#832, #834)"],` +
+	`"changes":[{"kind":"feat","text":"Env: Launch sessions under named environment profiles","author":"@subbeh"}],"total_changes":16}]}`
 
 func releaseServer(t *testing.T, calls *atomic.Int32, version string) *httptest.Server {
 	t.Helper()
@@ -496,7 +596,7 @@ func releaseServer(t *testing.T, calls *atomic.Int32, version string) *httptest.
 		calls.Add(1)
 		fmt.Fprintf(w, `[{"tag_name":%q,"html_url":%q,"body":"## What's Changed\n* fix(ui): refreshed"}]`,
 			version,
-			"https://github.com/YoanWai/agent-manager/releases/tag/"+version,
+			"https://github.com/wainmann/agent-manager/releases/tag/"+version,
 		)
 	}))
 }
@@ -525,9 +625,16 @@ func TestExtractChangesKeepsWhatAReaderCanAct(t *testing.T) {
 
 	changes, total := extractChanges(body)
 	want := []Change{
-		{Kind: KindFeature, Text: "UI: A feature"},
-		{Kind: KindFix, Text: "UI: A fix"},
-		{Kind: KindFeature, Text: "UI: A speedup"},
+		{Kind: KindFeature, Scope: "UI", Text: "A feature"},
+		{Kind: KindFix, Scope: "UI", Text: "A fix"},
+		{Kind: KindFix, Scope: "UI", Text: "A speedup"},
+		{Kind: KindOther, Scope: "Readme", Text: "A badge"},
+		{Kind: KindOther, Scope: "Deps", Text: "A bump"},
+		{Kind: KindOther, Text: "A workflow tweak"},
+		{Kind: KindOther, Text: "A build tweak"},
+		{Kind: KindOther, Text: "A reformat"},
+		{Kind: KindOther, Text: "A case"},
+		{Kind: KindOther, Scope: "UI", Text: "A rename"},
 		{Kind: KindOther, Text: "Ship the two agent skills for install via skills.sh"},
 	}
 	if total != len(want) || !slices.Equal(changes, want) {
@@ -553,20 +660,20 @@ func TestExtractHighlightsReadsTheAuthoredBullets(t *testing.T) {
 		"**Full Changelog**: https://example.com/compare",
 	}, "\n")
 
-	want := []string{
-		"The session list can take the whole terminal",
-		"Rows carry the agent's `last message` beside the name",
-		"Full notes explain the rest",
+	want := []Highlight{
+		{Text: "The session list can take the whole terminal"},
+		{Text: "Rows carry the agent's `last message` beside the name"},
+		{Text: "Full notes explain the rest"},
 	}
-	if got := extractHighlights(body); fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("extractHighlights() = %q, want %q", got, want)
+	if got := extractHighlights(body, "v0.45.0"); !slices.Equal(got, want) {
+		t.Fatalf("extractHighlights() = %+v, want %+v", got, want)
 	}
 }
 
 func TestExtractHighlightsIsEmptyWithoutTheSection(t *testing.T) {
 	body := "## What's Changed\n* feat(ui): a feature\n"
-	if got := extractHighlights(body); len(got) != 0 {
-		t.Fatalf("extractHighlights() = %q, want none", got)
+	if got := extractHighlights(body, "v0.45.0"); len(got) != 0 {
+		t.Fatalf("extractHighlights() = %+v, want none", got)
 	}
 }
 
@@ -575,12 +682,12 @@ func TestExtractHighlightsStopsAtTheCap(t *testing.T) {
 	for i := 0; i < maxHighlights+3; i++ {
 		lines = append(lines, fmt.Sprintf("- highlight %d", i))
 	}
-	got := extractHighlights(strings.Join(lines, "\n"))
+	got := extractHighlights(strings.Join(lines, "\n"), "v0.45.0")
 	if len(got) != maxHighlights {
 		t.Fatalf("extractHighlights() kept %d, want %d", len(got), maxHighlights)
 	}
-	if got[maxHighlights-1] != fmt.Sprintf("Highlight %d", maxHighlights-1) {
-		t.Fatalf("extractHighlights() last = %q", got[maxHighlights-1])
+	if got[maxHighlights-1].Text != fmt.Sprintf("Highlight %d", maxHighlights-1) {
+		t.Fatalf("extractHighlights() last = %+v", got[maxHighlights-1])
 	}
 }
 
@@ -601,23 +708,23 @@ func TestExtractThanksReadsTheAuthoredBullets(t *testing.T) {
 		"* feat(config): revive without an id opens the tool's session picker",
 	}, "\n")
 
-	want := []string{
-		"@dolutech asked for reboot recovery in #388 and then built the picker (#400)",
-		"@pandysp asked to hide the stats foot and the header in #408 and #409",
-		"@fruch reported that a live rename moved the worktree (#418)",
+	want := []Thanks{
+		{Handle: "@dolutech", Group: ThanksBuilt, Text: "asked for reboot recovery in #388 and then built the picker", Refs: []string{"#400"}},
+		{Handle: "@pandysp", Group: ThanksBuilt, Text: "asked to hide the stats foot and the header in #408 and #409"},
+		{Handle: "@fruch", Group: ThanksBuilt, Text: "reported that a live rename moved the worktree", Refs: []string{"#418"}},
 	}
-	if got := extractThanks(body); fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("extractThanks() = %q, want %q", got, want)
+	if got := extractThanks(body); !slices.EqualFunc(got, want, sameThanks) {
+		t.Fatalf("extractThanks() = %+v, want %+v", got, want)
 	}
-	if got := extractHighlights(body); len(got) != 1 {
-		t.Fatalf("highlights leaked thanks: %q", got)
+	if got := extractHighlights(body, "v0.45.0"); len(got) != 1 {
+		t.Fatalf("highlights leaked thanks: %+v", got)
 	}
 }
 
 func TestExtractThanksIsEmptyWithoutTheSection(t *testing.T) {
 	body := "## Highlights\n- a feature\n\n## What's Changed\n* feat(ui): a feature\n"
 	if got := extractThanks(body); len(got) != 0 {
-		t.Fatalf("extractThanks() = %q, want none", got)
+		t.Fatalf("extractThanks() = %+v, want none", got)
 	}
 }
 
@@ -635,30 +742,30 @@ func TestExtractThanksStopsAtTheCap(t *testing.T) {
 func TestCatalogCarriesHighlightsThroughTheCache(t *testing.T) {
 	body := `## Highlights\n- the list can take the whole terminal\n\n## Thank you\n- @pandysp asked for full screen in #357\n\n## What's Changed\n* feat(ui): full screen sessions mode`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, `[{"tag_name":"v0.34.0","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v0.34.0","body":"%s","draft":false,"prerelease":false}]`, body)
+		fmt.Fprintf(w, `[{"tag_name":"v0.34.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.34.0","body":"%s","draft":false,"prerelease":false}]`, body)
 	}))
 	defer server.Close()
 	defer swapReleasesURL(server.URL)()
 
 	dir := t.TempDir()
-	wantHighlights := []string{"The list can take the whole terminal"}
-	wantThanks := []string{"@pandysp asked for full screen in #357"}
+	wantHighlights := []Highlight{{Text: "The list can take the whole terminal"}}
+	wantThanks := []Thanks{{Handle: "@pandysp", Group: ThanksBuilt, Text: "asked for full screen in #357"}}
 	fetched, err := Check(context.Background(), dir, "v0.33.0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := fetched.Releases[0].Highlights; fmt.Sprint(got) != fmt.Sprint(wantHighlights) {
-		t.Fatalf("fetched highlights = %q, want %q", got, wantHighlights)
+	if got := fetched.Releases[0].Highlights; !slices.Equal(got, wantHighlights) {
+		t.Fatalf("fetched highlights = %+v, want %+v", got, wantHighlights)
 	}
-	if got := fetched.Releases[0].Thanks; fmt.Sprint(got) != fmt.Sprint(wantThanks) {
-		t.Fatalf("fetched thanks = %q, want %q", got, wantThanks)
+	if got := fetched.Releases[0].Thanks; !slices.EqualFunc(got, wantThanks, sameThanks) {
+		t.Fatalf("fetched thanks = %+v, want %+v", got, wantThanks)
 	}
 	cached := Cached(dir, "v0.33.0")
-	if got := cached.Releases[0].Highlights; fmt.Sprint(got) != fmt.Sprint(wantHighlights) {
-		t.Fatalf("cached highlights = %q, want %q", got, wantHighlights)
+	if got := cached.Releases[0].Highlights; !slices.Equal(got, wantHighlights) {
+		t.Fatalf("cached highlights = %+v, want %+v", got, wantHighlights)
 	}
-	if got := cached.Releases[0].Thanks; fmt.Sprint(got) != fmt.Sprint(wantThanks) {
-		t.Fatalf("cached thanks = %q, want %q", got, wantThanks)
+	if got := cached.Releases[0].Thanks; !slices.EqualFunc(got, wantThanks, sameThanks) {
+		t.Fatalf("cached thanks = %+v, want %+v", got, wantThanks)
 	}
 }
 
@@ -714,17 +821,71 @@ func TestExtractLeadBoundsTheSummary(t *testing.T) {
 
 func TestHighlightsKeepBalancedAccentMarks(t *testing.T) {
 	body := "## Highlights\n- press `ctrl+x` to step effort\n- a stray ` mark is dropped\n"
-	want := []string{"Press `ctrl+x` to step effort", "A stray  mark is dropped"}
-	if got := extractHighlights(body); !slices.Equal(got, want) {
-		t.Fatalf("extractHighlights() = %q, want %q", got, want)
+	want := []Highlight{{Text: "Press `ctrl+x` to step effort"}, {Text: "A stray  mark is dropped"}}
+	if got := extractHighlights(body, "v0.45.0"); !slices.Equal(got, want) {
+		t.Fatalf("extractHighlights() = %+v, want %+v", got, want)
 	}
 }
 
 func TestThanksStayPlain(t *testing.T) {
 	body := "## Thank you\n- @someone fixed `the thing` (#12)\n"
-	want := []string{"@someone fixed the thing (#12)"}
-	if got := extractThanks(body); !slices.Equal(got, want) {
-		t.Fatalf("extractThanks() = %q, want %q", got, want)
+	want := []Thanks{{Handle: "@someone", Group: ThanksBuilt, Text: "fixed the thing", Refs: []string{"#12"}}}
+	if got := extractThanks(body); !slices.EqualFunc(got, want, sameThanks) {
+		t.Fatalf("extractThanks() = %+v, want %+v", got, want)
+	}
+}
+
+func sameThanks(a, b Thanks) bool {
+	return a.Handle == b.Handle && a.Group == b.Group && a.Text == b.Text && slices.Equal(a.Refs, b.Refs)
+}
+
+func TestHighlightLabelsStartAtTheCutoff(t *testing.T) {
+	body := "## Highlights\n- `First-run setup` picks your agents.\n- Plain line.\n"
+	want := []Highlight{{Label: "First-run setup", Text: "Picks your agents."}, {Text: "Plain line."}}
+	if got := extractHighlights(body, "v0.46.0"); !slices.Equal(got, want) {
+		t.Fatalf("extractHighlights() = %+v, want %+v", got, want)
+	}
+	old := extractHighlights("## Highlights\n- `agent-manager export` and `import` move settings.\n", "v0.45.0")
+	if wantOld := (Highlight{Text: "`agent-manager export` and `import` move settings."}); len(old) != 1 || old[0] != wantOld {
+		t.Fatalf("a release before the cutoff keeps its backticks in one line, got %+v", old)
+	}
+}
+
+func TestThanksReadGroupsHandlesAndRefs(t *testing.T) {
+	body := "## Thank you\n### Built it\n- @subbeh built environment profiles (#832, #834)\n### Found it\n- @ptrin measured the idle CPU spin (#894)\n### Started something\n- @larroy opened fixes for the worktree row (#929, #930)\n"
+	want := []Thanks{
+		{Handle: "@subbeh", Group: ThanksBuilt, Text: "built environment profiles", Refs: []string{"#832", "#834"}},
+		{Handle: "@ptrin", Group: ThanksFound, Text: "measured the idle CPU spin", Refs: []string{"#894"}},
+		{Handle: "@larroy", Group: ThanksStarted, Text: "opened fixes for the worktree row", Refs: []string{"#929", "#930"}},
+	}
+	if got := extractThanks(body); !slices.EqualFunc(got, want, sameThanks) {
+		t.Fatalf("extractThanks() = %+v, want %+v", got, want)
+	}
+}
+
+func TestUngroupedThanksWithoutRefsStayUnderBuilt(t *testing.T) {
+	want := []Thanks{{Handle: "@someone", Group: ThanksBuilt, Text: "asked for it"}}
+	if got := extractThanks("## Thank you\n- @someone asked for it\n"); !slices.EqualFunc(got, want, sameThanks) {
+		t.Fatalf("extractThanks() = %+v, want %+v", got, want)
+	}
+}
+
+func TestThanksRefsMayEndTheSentence(t *testing.T) {
+	want := []Thanks{{Handle: "@someone", Group: ThanksBuilt, Text: "added X", Refs: []string{"#1", "#2"}}}
+	if got := extractThanks("## Thank you\n- @someone added X (#1, #2).\n"); !slices.EqualFunc(got, want, sameThanks) {
+		t.Fatalf("extractThanks() = %+v, want %+v", got, want)
+	}
+}
+
+func TestThanksKeepTheLineBoundWithTheirRefs(t *testing.T) {
+	body := "## Thank you\n- @someone " + strings.Repeat("word ", 60) + "(#1, #2)\n"
+	got := extractThanks(body)
+	if len(got) != 1 || !slices.Equal(got[0].Refs, []string{"#1", "#2"}) {
+		t.Fatalf("refs must survive the bound: %+v", got)
+	}
+	line := got[0].Handle + " " + got[0].Text + " (#1, #2)"
+	if visible := len([]rune(line)); visible > maxLineLength {
+		t.Fatalf("thanks line is %d characters, want at most %d", visible, maxLineLength)
 	}
 }
 
@@ -742,7 +903,7 @@ func TestTruncateCountsVisibleCharacters(t *testing.T) {
 func TestCatalogCarriesTheLeadThroughTheCache(t *testing.T) {
 	body := `## v0.40.0\n**Pickers are here!**\n\nA summary with ` + "`ctrl+x`" + `.\n\n## Highlights\n- a highlight\n\n## What's Changed\n* feat(ui): a feature`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprintf(w, `[{"tag_name":"v0.40.0","html_url":"https://github.com/YoanWai/agent-manager/releases/tag/v0.40.0","body":"%s","draft":false,"prerelease":false}]`, body)
+		fmt.Fprintf(w, `[{"tag_name":"v0.40.0","html_url":"https://github.com/wainmann/agent-manager/releases/tag/v0.40.0","body":"%s","draft":false,"prerelease":false}]`, body)
 	}))
 	defer server.Close()
 	defer swapReleasesURL(server.URL)()
@@ -790,6 +951,7 @@ func TestCatalogFileWinsOverTheLegacyFile(t *testing.T) {
 func TestParserNumberPinsTheReleaseShape(t *testing.T) {
 	shapes := map[int][]string{
 		1: {"version", "url", "headline", "summary", "highlights", "thanks", "changes.kind", "changes.text", "changes.author", "total_changes"},
+		2: {"version", "url", "published_at", "headline", "summary", "highlights.label", "highlights.text", "thanks.handle", "thanks.group", "thanks.text", "thanks.refs", "changes.kind", "changes.scope", "changes.text", "changes.author", "total_changes"},
 	}
 	want, ok := shapes[catalogParser]
 	if !ok {
@@ -809,7 +971,7 @@ func jsonKeys(structType reflect.Type, prefix string) []string {
 		if elem.Kind() == reflect.Slice {
 			elem = elem.Elem()
 		}
-		if elem.Kind() == reflect.Struct {
+		if elem.Kind() == reflect.Struct && elem != reflect.TypeOf(time.Time{}) {
 			keys = append(keys, jsonKeys(elem, name+".")...)
 			continue
 		}

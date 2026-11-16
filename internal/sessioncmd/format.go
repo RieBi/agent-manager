@@ -54,6 +54,18 @@ func FormatSession(session Session) string {
 	if session.AgentSessionID != "" {
 		line += " on conversation " + session.AgentSessionID
 	}
+	if session.Warning != "" {
+		line += "\nwarning: " + session.Warning
+	}
+	return line
+}
+
+// FormatDeletion is what both fronts print once a delete went through.
+func FormatDeletion(deleted Deletion) string {
+	line := "deleted " + FormatSession(deleted.Session)
+	if deleted.Notice != "" {
+		line += "\n" + deleted.Notice
+	}
 	return line
 }
 

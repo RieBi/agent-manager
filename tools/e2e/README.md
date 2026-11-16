@@ -40,7 +40,24 @@ Before the first command, the harness waits for the unique shell prompt in the
 managed pane. A command acknowledgement file then proves execution. The Help
 wheel assertion compares the exact final frame with a keyboard-only PageDown
 baseline, asserting Help remains open at the exact keyboard-only scroll
-position. Poll waits require an observable condition; the 50ms cadence is never a transition delay.
+position. Poll waits require an observable condition. The cadence starts at 50ms and
+widens with elapsed time to at most 500ms; it is never a transition delay.
+
+Two rules keep these scenarios honest on a slower runner.
+
+**Wait for the condition, never for the clock.** A transition is awaited by
+observing it, through `Sandbox.wait`. A fixed pause on the click before it holds
+only as long as the machine that chose the number, so it passes locally and
+fails on CI, or the reverse. `test_sleeps.py` fails any sleep outside the poll
+cadence; set a number there instead when the delay is part of the behaviour
+being checked.
+
+**Make readiness prove the reader, not the environment.** `send-keys` hands its
+keys to whoever reads next, and it does not wait for the command it typed to
+start. A pane flag cannot stand in for readiness either: an interactive shell
+asks for bracketed paste on its own, so the flag reads ready before the test's
+reader has the tty. The recorder touches a file once it owns the tty, and the
+scenario waits for that file.
 
 This is bounded local tmux evidence, not the supported terminal/platform/tool
 matrix. CI runs this smoke in its own job and retains evidence artifacts for
@@ -147,6 +164,6 @@ or the Linux/SSH platform matrix.
 python3 tools/e2e/ssh_scenarios.py --binary /tmp/agent-manager-e2e
 ```
 
-A fixture `ssh` first on PATH drops every argument but the remote command and runs it with `/bin/sh -c` under a second disposable HOME and its own short tmux socket directory, so the "host" is a real agent-manager with its own profile and no network, keys or `~/.ssh`. A copy of the binary, first on PATH at a path unique to the run, serves both sides. The scenario seeds an agent on the host through its CLI, adds the connection through the `C` dialog, waits for the remote row, answers it from the quick bar and checks the prompt reached the host's pane with nothing queued in its inbox, kills it and checks its tmux session is gone on the host, and requires that the local store holds the connection and no sessions. A second connection whose ssh fails shows as unreachable. The first refresh starts the host's headless manager.
+A fixture `ssh` first on PATH drops every argument but the remote command and runs it with `/bin/sh -c` under a second disposable HOME and its own short tmux socket directory, so the "host" is a real agent-manager with its own profile and no network, keys or `~/.ssh`. A copy of the binary, first on PATH at a path unique to the run, serves both sides. The scenario seeds an agent on the host through its CLI, adds the connection through the `C` dialog, waits for the remote row, answers it from the quick bar and checks the prompt reached the host's pane with nothing queued in its inbox, kills it and checks its tmux session is gone on the host. It then revives, archives and restores it, deletes a second agent and checks the host's store no longer has it, attaches to the first and detaches, and starts an agent, a terminal and a group there. It requires that the local store holds the connection and no sessions. A second connection whose ssh fails shows as unreachable. The first refresh starts the host's headless manager.
 
-Cleanup ends every process by PID: the binary copy's processes (the host's `serve` among them) and the tmux servers on the run's own sockets, listed in `ended-processes.json`. No `kill-server` is sent. Attach needs a terminal on both sides and is left to the unit tests, which check the SSH command it builds.
+Cleanup ends every process by PID: the binary copy's processes (the host's `serve` among them) and the tmux servers on the run's own sockets, listed in `ended-processes.json`. No `kill-server` is sent.

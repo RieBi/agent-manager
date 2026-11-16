@@ -36,9 +36,7 @@ type Frame struct {
 	SGR     bool
 	Alt     bool
 	History int
-	// Writes is how many queued writes had landed when the capture was
-	// taken.
-	Writes uint64
+	Writes  uint64
 }
 
 // Sink receives what the watcher pushes: frames, and the loss of a client
@@ -97,6 +95,11 @@ type Watcher struct {
 	// queued and landed count the writes to a polled pane in and out, so a
 	// frame can tell whether it shows them all.
 	queued, landed uint64
+	// fast streams a changing pane at the frame budget, for a focused
+	// session; a pane only previewed beside the list keeps the live tick.
+	fast bool
+	// paced wakes a capture waiting out the old pace when fast flips.
+	paced chan struct{}
 }
 
 // retryBackoff is how long a failed session sits before the watcher
@@ -111,7 +114,7 @@ const (
 // New returns a watcher on driver's server that pushes to sink. Its owner
 // points it with SetFocus and closes it on quit.
 func New(driver *tmux.Driver, liveTick time.Duration, sink Sink) *Watcher {
-	return &Watcher{driver: driver, sink: sink, liveTick: liveTick}
+	return &Watcher{driver: driver, sink: sink, liveTick: liveTick, paced: make(chan struct{}, 1)}
 }
 
 // SetFocus points the watcher at a session, replacing any previous one.
@@ -154,6 +157,30 @@ func (w *Watcher) SetFocus(id string) {
 	}()
 }
 
+// Pace sets how soon a pane that just changed is captured again: within the
+// frame budget while fast, on the live tick otherwise.
+func (w *Watcher) Pace(fast bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fast == fast {
+		return
+	}
+	w.fast = fast
+	select {
+	case w.paced <- struct{}{}:
+	default:
+	}
+}
+
+func (w *Watcher) changedGap() time.Duration {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.fast {
+		return frameBudget
+	}
+	return w.liveTick
+}
+
 // InputSent tells the watcher a write just reached the pane, so it looks
 // for the echo. A polled watcher hears it from WriteLanded instead.
 func (w *Watcher) InputSent(id string) {
@@ -164,7 +191,6 @@ func (w *Watcher) InputSent(id string) {
 	}
 }
 
-// landedLocked wakes the watcher on id to look for a write's echo.
 func (w *Watcher) landedLocked(id string) {
 	if w.id != id {
 		return
@@ -188,8 +214,6 @@ func (w *Watcher) CountWrite(id string) bool {
 	return true
 }
 
-// WriteLanded marks a counted write as done and wakes the watcher on id to
-// look for its echo.
 func (w *Watcher) WriteLanded(id string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -437,8 +461,16 @@ func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, in
 		return
 	}
 	lastCapture := time.Now()
-	nextCapture := lastCapture.Add(captureGap)
+	changed := false
 	var inputUntil time.Time
+	// A write that leaves the text unchanged, like the cursor move some TUIs
+	// send ahead of an echo, must not hold back that echo.
+	due := func() time.Time {
+		if changed && !time.Now().Before(inputUntil) {
+			return lastCapture.Add(w.changedGap())
+		}
+		return lastCapture.Add(captureGap)
+	}
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	for {
@@ -458,11 +490,8 @@ func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, in
 			inputUntil = time.Now().Add(frameBudget)
 			continue
 		}
-		captureAt := nextCapture
 		// Echo may arrive after a streaming paint or a cursor-only update.
-		if time.Now().Before(inputUntil) {
-			captureAt = lastCapture.Add(captureGap)
-		}
+		captureAt := due()
 		for wait := time.Until(captureAt); wait > 0; wait = time.Until(captureAt) {
 			timer.Reset(wait)
 			select {
@@ -470,7 +499,9 @@ func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, in
 				return
 			case <-input:
 				inputUntil = time.Now().Add(frameBudget)
-				captureAt = lastCapture.Add(captureGap)
+				captureAt = due()
+			case <-w.paced:
+				captureAt = due()
 			case <-timer.C:
 			}
 			timer.Stop()
@@ -488,15 +519,9 @@ func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, in
 			w.clearIfCurrent(id, stop)
 			return
 		}
-		// A write that leaves the text unchanged, like the cursor move some
-		// TUIs send ahead of an echo, must not hold back that echo.
-		gap := captureGap
-		if pane != previous {
-			gap = frameBudget
-		}
+		changed = pane != previous
 		previous = pane
 		lastCapture = time.Now()
-		nextCapture = lastCapture.Add(gap)
 	}
 }
 

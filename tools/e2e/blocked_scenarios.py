@@ -26,7 +26,7 @@ import time
 from smoke import Sandbox
 from scenarios import (READY_MARKER, agent_pane, capture, last_frame,
                        ensure_binary, key,
-                       pane_text, profile_dir, select_row, seed_store,
+                       pane_text, profile_dir, row_selected, select_row, seed_store,
                        spawn_form, start_manager, store_sessions,
                        write_fixture)
 
@@ -137,7 +137,12 @@ def move_blocked(sandbox, binary):
         # Accepted and in flight: the durable row is still unchanged.
         assert group_of(sandbox, name) != 'blocked-group', 'move committed while locked'
         key(sandbox, 'Escape')
-        select_row(sandbox, name, 'move-reselect')
+        # The row is already selected: the card opened on it a moment ago and
+        # Escape returned to the list with the cursor where it was. Re-running
+        # the cursor walk here would spend the foreground budget on captures
+        # and can move the selection, so the card is reopened directly.
+        sandbox.wait('move-reselect', lambda: capture(sandbox),
+                     lambda value: row_selected(value, name), timeout=2)
         key(sandbox, 'm')
         frame(sandbox, 'move-reopened', '⇄ Move')
         key(sandbox, 'Down')
@@ -214,9 +219,9 @@ def focus_blocked(sandbox, binary):
     frame(sandbox, 'focus-returned-list', 'A G E N T', '? Keys')
     select_row(sandbox, name, 'focus-reselect')
     key(sandbox, 'Enter')
-    frame(sandbox, 'focus-reentered', READY_MARKER)
+    frame(sandbox, 'focus-reentered', 'focused · ctrl+q')
     key(sandbox, 'C-q')
-    frame(sandbox, 'focus-detached', 'A G E N T')
+    frame(sandbox, 'focus-detached', 'A G E N T', 'focused · ctrl+q')
 
 
 CASES = [

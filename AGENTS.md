@@ -87,6 +87,7 @@ in code or in a user's file stops receiving fixes the day it is written.
 ```bash
 go run .                                        # run the TUI
 go build ./...
+make build                                      # ./agent-manager stamped with git describe
 mkdir -p /tmp/amtest && env -u TMUX TMUX_TMPDIR=/tmp/amtest go test -race ./...
 ```
 
@@ -161,8 +162,8 @@ release or a user's sessions before.
   bindings, so a table read from anywhere else gives a session the wrong
   keys. A `config.toml` from an earlier release is read once, by the import
   in `internal/store`.
-- **`internal/update` verifies the checksum before anything is renamed over
-  the running binary.** No redirect to another host, no wider permissions on
+- **`internal/update` verifies the checksum and the build provenance before
+  anything is renamed over the running binary.** No redirect to another host, no wider permissions on
   the staged file, no write outside the staging directory.
 - **Workflow actions are pinned to a release tag** and bumped by dependabot.
   A branch ref or a missing ref is a defect.
@@ -193,9 +194,11 @@ else's commit. Branch from `origin/main` after a fetch, not from the local
 ## Releases
 
 A push of a `v*` tag runs `.github/workflows/release.yml`: goreleaser on
-Actions with the `RELEASE_TOKEN` and `AUR_KEY` secrets, then build
-provenance attested over `dist/checksums.txt`. Only the admin role can push
-the tag.
+Actions creates the release with the workflow token and pushes the Homebrew
+cask with the `RELEASE_TOKEN` secret (`AUR_KEY`, `SCOOP_TOKEN` and
+`WINGET_TOKEN` cover the other packages), then build provenance is attested
+over `dist/checksums.txt` and `badges.yml` is dispatched. Only the admin role
+can push the tag.
 
 ```bash
 tag=v0.30.0                       # the release being cut
@@ -204,7 +207,8 @@ gh run watch "$(gh run list --workflow release.yml --branch "$tag" --limit 1 --j
 ```
 
 Without `AUR_KEY` the AUR step silently skips and the release still reports
-success while the Arch package goes stale, so the run log must show the
+success while the Arch package goes stale, and without `RELEASE_TOKEN` the
+Homebrew cask skips the same way, so the run log must show the
 release published, the Homebrew cask pushed, and the AUR push. A failed
 run after the release was created is retried from a clean tag. Fix the cause
 on `origin/main`, then `gh release delete "$tag" --cleanup-tag`, which
@@ -243,21 +247,27 @@ with `gh release edit <tag> --notes-file notes.md`.
 - `main.go` dispatches subcommands (`rename`, `review-repo`, `sessions`,
   `spawn`, `mcp`, and the rest of the workspace CLI) and boots the TUI.
 - `internal/ui` is the Bubble Tea program: one `Model` that routes messages
-  and composes the frame. Help, Review, Focus, the Rail, Settings, the New
-  Session form, the quick bar, the small dialogs and the notices panel live in
-  child packages
-  (`internal/ui/{help,review,focus,rail,settings,spawn,quick,dialogs,notices}`);
-  `presentation` holds shared text helpers and `theme` the palettes. Features
-  that stay in `ui` each own their state, keys and view through a type with a
-  narrow host interface: `pathComplete`, `composer` and
-  `launchHintDialog`. Store, tmux and Git
-  work runs on the ordered effect lane (`effects.go`) through each feature's
-  `<feature>_effect.go`. Root files are named `<feature>_<concern>.go`, so
-  `ls internal/ui/settings_*` is the whole Settings adapter; only `keys.go`,
-  `mouse.go`, `updates.go` and `ids.go` route instead of owning a feature. A
-  new feature adds its name to `tools/architecture/check-file-names`. The
-  package map, the CI checks and the reasons are in
-  [docs/architecture.md](docs/architecture.md).
+  and composes the frame. Each feature is a child package
+  (`internal/ui/<feature>`: help, review, focus, rail, settings, spawn, quick,
+  dialogs, notices, onboarding, connections, geometry, composer, pathcomplete, preview,
+  frame, statusbar, startup, session, launchhint, terminal, workspace;
+  `presentation`, `theme` and `surface` are shared). Cards, resize and
+  focus are surfaces on a stack over the base screen (list or Review), read
+  from the top for input; there is no mode enum
+  ([docs/architecture.md](docs/architecture.md#decisions)). A package never imports the
+  root. It changes root state by returning values (`rail.Decision`,
+  `rail.Intent`), or, where a surface's signature returns only a `tea.Cmd`,
+  through `Root` calls that each carry out one decision
+  (`settings.Root.Apply`, `dialogs.ForkRoot.Submit`). Store, tmux
+  and Git work runs on the ordered effect lane: `ui/effects` holds the
+  contract, each package declares its own requests, and the root only binds
+  and applies them in `effects_adapter_executor.go`. Root files are the
+  per-feature adapters, `<feature>_adapter*.go`, `<feature>_*_effect.go` and
+  `<feature>_*_surface.go`, so `ls internal/ui/settings_*` is the whole
+  Settings adapter; only `keys.go`, `mouse.go`, `updates.go` and `ids.go`
+  route. A new feature is a package and adds its name to
+  `tools/architecture/check-file-names`. The package map, the CI checks and
+  the reasons are in [docs/architecture.md](docs/architecture.md).
 - `internal/tmux` owns the dedicated tmux socket and control-mode client;
   `internal/store` is the SQLite state, Settings included; `internal/status`
   classifies pane output into agent states; `internal/config` holds the

@@ -19,6 +19,7 @@ import (
 	"github.com/YoanWai/agent-manager/internal/status"
 	"github.com/YoanWai/agent-manager/internal/store"
 	"github.com/YoanWai/agent-manager/internal/sysstat"
+	"github.com/YoanWai/agent-manager/internal/testenv"
 	"github.com/YoanWai/agent-manager/internal/testfixture"
 	"github.com/YoanWai/agent-manager/internal/tmux"
 	"github.com/charmbracelet/x/ansi"
@@ -28,7 +29,7 @@ import (
 const testSocket = "amexectest"
 
 func tmuxCmd(args ...string) *exec.Cmd {
-	cmd := exec.Command(tmux.Binary, append([]string{"-L", testSocket}, args...)...)
+	cmd := exec.Command(tmux.Binary, tmux.SocketArgs(testSocket, args...)...)
 	if runtime.GOOS == "windows" {
 		cmd.Env = append(os.Environ(), "PSMUX_NO_WARM=1")
 	}
@@ -45,6 +46,13 @@ func TestMain(m *testing.M) {
 }
 
 func runTests(m *testing.M) int {
+	tmux.ConfigFile = os.DevNull
+	// An inherited GIT_DIR points the temp repos these tests build at the
+	// repo running them.
+	if err := testenv.IsolateGit(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	cleanup, err := testfixture.Prepare(testSocket)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -114,6 +122,7 @@ func buildModel(t *testing.T) *harness {
 				TurnEnd:        `^[✻✳✶✽✢·✦✧+*] \S+ for \d.*$`,
 				BusyLine:       `^[✻✳✶✽✢·✦✧+*] Waiting for \d+ background agents? to finish`,
 				LimitLine:      `(?m)You've hit your .+limit`,
+				DialogQuestion: `(?m)^ ((?:Do you want)[^?\n]*\?)`,
 				Rules: []config.Rule{
 					{State: status.Waiting, Pattern: "Enter to confirm"},
 					{State: status.Errored, Pattern: `(?im)^\s*error:`},
@@ -306,7 +315,7 @@ func (h *harness) spawnSession(toolName, name, dir, group, prompt string, autoNa
 		}
 	}
 	plan := launch.Assemble(toolName, tool, prompt, autoNamed, false)
-	command, env, err := launch.Environment(h.hooks, toolName, tool, plan.Command, id, dir, time.Time{}, nil)
+	command, env, _, err := launch.Environment(h.hooks, toolName, tool, plan.Command, id, dir, time.Time{}, nil)
 	if err != nil {
 		return err
 	}

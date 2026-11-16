@@ -3,7 +3,7 @@ name: agent-manager
 description: Run a fleet of AI coding agents as live tmux sessions with agent-manager. Use when a developer is running more than one coding agent, needs to see which one is working or blocked, wants to spawn another on an independent task, or wants to review an agent's diff without leaving the terminal.
 license: Apache-2.0
 homepage: https://agent-manager.dev
-repository: https://github.com/YoanWai/agent-manager
+repository: https://github.com/wainmann/agent-manager
 ---
 
 <!--
@@ -39,7 +39,7 @@ brew install agent-manager
 ```
 
 Other routes: the install script, the AUR (`yay -S agent-manager-bin`), `mise use -g
-ubi:YoanWai/agent-manager`, `go install github.com/YoanWai/agent-manager@latest`, or a
+github:wainmann/agent-manager`, `go install github.com/YoanWai/agent-manager@latest`, or a
 prebuilt binary from the releases page.
 
 ## The keys that matter
@@ -59,9 +59,9 @@ prebuilt binary from the releases page.
 ## Status colours
 
 A row is coloured `working`, `waiting`, `finished`, `idle` or `errored`. Claude Code
-reports through hook events; every other CLI is read from its pane with regexes. Twelve
+reports through hook events; every other CLI is read from its pane with regexes. Thirteen
 CLIs ship with working profiles: Claude Code, OpenCode, Codex, Grok Build, Gemini CLI,
-Antigravity CLI, Pi, Command Code, Hermes Agent, Muse Code, Oh My Pi and Cursor CLI. Every profile
+Antigravity CLI, Pi, Command Code, Hermes Agent, Muse Code, Oh My Pi, Cursor CLI and Kiro CLI. Every profile
 ships in the binary, so an upgrade brings the current rules for all of them. A CLI
 outside that list is a feature request, and the `CLIs` row in Settings ends with
 `request CLI support`, which opens one prefilled.
@@ -70,7 +70,10 @@ outside that list is a feature request, and the `CLIs` row in Settings ends with
 
 Sessions of MCP-capable CLIs carry agent-manager's own MCP server over stdio, so an agent can
 `create_session` to spawn a peer, `send_session` to message one, `wait_for_session` to block
-on one, `task` to claim shared work, and `reserve_files` to declare what it is editing.
+on one, `task` to claim shared work, and `reserve_files` to declare what it is editing. Once a
+peer's work is saved, `delete_session` (or `agent-manager delete <id>`) removes it with its
+worktree and branch. A worktree with uncommitted or unpushed work, or one another session
+still uses, stays with its branch, and the result's notice says so.
 
 ## Reference
 

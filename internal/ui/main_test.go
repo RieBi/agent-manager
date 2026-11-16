@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/YoanWai/agent-manager/internal/notify"
+	"github.com/YoanWai/agent-manager/internal/testenv"
 	"github.com/YoanWai/agent-manager/internal/testfixture"
 	"github.com/YoanWai/agent-manager/internal/tmux"
 )
@@ -41,6 +42,13 @@ func TestMain(m *testing.M) {
 }
 
 func runTests(m *testing.M) int {
+	tmux.ConfigFile = os.DevNull
+	// An inherited GIT_DIR points the temp repos these tests build at the
+	// repo running them.
+	if err := testenv.IsolateGit(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	cleanup, err := testfixture.Prepare(testSocket)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -84,7 +92,7 @@ func runTests(m *testing.M) int {
 
 // socketTmuxCmd builds a raw tmux command aimed at one of the test servers.
 func socketTmuxCmd(socket string, args ...string) *exec.Cmd {
-	cmd := exec.Command(tmux.Binary, append([]string{"-L", socket}, args...)...)
+	cmd := exec.Command(tmux.Binary, tmux.SocketArgs(socket, args...)...)
 	if runtime.GOOS == "windows" {
 		cmd.Env = append(os.Environ(), "PSMUX_NO_WARM=1")
 	}

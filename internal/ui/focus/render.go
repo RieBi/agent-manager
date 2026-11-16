@@ -3,6 +3,7 @@ package focus
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
@@ -42,10 +43,7 @@ func (m *Model) PrepareFrame(ctx FrameContext) FrameContent {
 		return FrameContent{}
 	}
 	topPadding := ctx.Height - len(pane)
-	lines := make([]string, len(pane))
-	for i, raw := range pane {
-		lines[i] = plainPaneLine(raw)
-	}
+	safe, lines := paneText(pane)
 	m.frame = displayedFrame{
 		box: Box{
 			X:      ctx.OriginX,
@@ -55,6 +53,7 @@ func (m *Model) PrepareFrame(ctx FrameContext) FrameContent {
 			Valid:  true,
 		},
 		lines:     lines,
+		links:     frameLinks(safe, lines, ctx.Width),
 		rowOffset: rowOffset,
 	}
 
@@ -113,23 +112,54 @@ func (m Model) withCursor(row int, raw string, width int, style lipgloss.Style) 
 		pad := strings.Repeat(" ", cursorCol-lineWidth)
 		return fitPaneLine(clean+pad+style.Render(" "), width)
 	}
-	head := ansi.Truncate(clean, cursorCol, "")
-	tail := ansi.TruncateLeft(clean, cursorCol+1, "")
-	cell := graphemeAtCell(ansi.Strip(clean), cursorCol)
-	return fitPaneLine(head+style.Render(cell)+tail, width)
-}
-
-func graphemeAtCell(line string, column int) string {
-	for _, span := range graphemeSpans(line) {
-		if column < span.endCell {
-			return span.text
-		}
+	line := ansi.Strip(clean)
+	startByte, endByte := graphemeRangeAtColumns(line, cursorCol, cursorCol+1)
+	head, tail := splitCursorLine(clean, startByte, endByte)
+	cell := line[startByte:endByte]
+	withCursor := head + style.Render(cell) + tail
+	if ansi.Strip(withCursor) != line {
+		return fitPaneLine(clean, width)
 	}
-	return " "
+	return fitPaneLine(withCursor, width)
 }
 
-func plainPaneLine(line string) string {
-	return ansi.Strip(safePaneLine(line))
+// Keep ANSI sequences when splitting at byte offsets in the stripped text.
+func splitCursorLine(line string, startByte, endByte int) (string, string) {
+	var head, tail strings.Builder
+	head.Grow(len(line))
+	tail.Grow(len(line))
+	parser := ansi.GetParser()
+	defer ansi.PutParser(parser)
+	var state byte
+	pos := 0
+	for len(line) > 0 {
+		seq, _, n, next := ansi.DecodeSequence(line, state, parser)
+		if n == 0 {
+			break
+		}
+		if len(seq) == 0 {
+			line, state = line[n:], next
+			continue
+		}
+		plain := seq
+		if seq[0] == '\x1b' || !utf8.ValidString(seq) {
+			plain = ansi.Strip(seq)
+		}
+		if len(plain) == 0 {
+			head.WriteString(seq)
+			tail.WriteString(seq)
+		} else {
+			if pos < startByte {
+				head.WriteString(seq[:min(len(seq), startByte-pos)])
+			}
+			if pos+len(plain) > endByte {
+				tail.WriteString(seq[max(0, endByte-pos):])
+			}
+			pos += len(plain)
+		}
+		line, state = line[n:], next
+	}
+	return head.String(), tail.String()
 }
 
 func fitPaneLine(line string, width int) string {

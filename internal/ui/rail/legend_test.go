@@ -42,6 +42,12 @@ func TestViewLegendCarriesTheUnreadAlert(t *testing.T) {
 	if legend := model.ViewLegend(ctx); !slices.Equal(legend.Alerts, [][2]string{{"m", "unread"}}) {
 		t.Fatalf("unread messages should lead the tier, got %+v", legend.Alerts)
 	}
+	ctx.Unread = [2]string{}
+	ctx.Messages = [2]string{"m", "messages"}
+	legend := model.ViewLegend(ctx)
+	if legend.Alerts != nil || len(legend.Pairs) == 0 || legend.Pairs[0] != [2]string{"m", "messages"} {
+		t.Fatalf("read messages should lead the quiet pairs without an alert, got %+v", legend)
+	}
 }
 
 func TestRootLegendOnlyOffersApplicableActions(t *testing.T) {
@@ -62,5 +68,19 @@ func TestRootLegendOnlyOffersApplicableActions(t *testing.T) {
 		if pair[1] == "terminal" {
 			t.Fatal("archived view offers terminal")
 		}
+	}
+}
+
+func TestRemoteLegendOffersDeleteOnAnAgentOnly(t *testing.T) {
+	model := rail.New(nil)
+	ctx := rail.LegendContext{ListKeys: keybind.DefaultList()}
+	agent := model.RemoteLegend(ctx, rail.RemoteRow{Kind: rail.SessionRow, Host: "box"}, false)
+	if !slices.Contains(agent.Pairs, [2]string{"d", "delete"}) {
+		t.Fatalf("a remote agent should offer delete, got %+v", agent.Pairs)
+	}
+	// d on a shell closes it, which x already offers.
+	shell := model.RemoteLegend(ctx, rail.RemoteRow{Kind: rail.SessionRow, Host: "box", Terminal: true}, false)
+	if slices.Contains(shell.Pairs, [2]string{"d", "delete"}) {
+		t.Fatalf("a remote shell should leave delete to close, got %+v", shell.Pairs)
 	}
 }

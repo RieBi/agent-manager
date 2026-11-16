@@ -5,6 +5,7 @@ import (
 
 	remote "github.com/YoanWai/agent-manager/internal/remote/value"
 	uidialogs "github.com/YoanWai/agent-manager/internal/ui/dialogs"
+	"github.com/YoanWai/agent-manager/internal/ui/presentation"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -67,22 +68,18 @@ func (d *Dialog) SaveFailed(gen uint64) {
 	}
 }
 
-// DialogAction is what a key on the dialog asks the root for.
 type DialogAction uint8
 
 const (
 	DialogNone DialogAction = iota
 	DialogCancel
-	// DialogSave carries a connection that passed validation.
 	DialogSave
-	// DialogRefused carries why enter saved nothing.
 	DialogRefused
 )
 
 type DialogKey struct {
-	Action DialogAction
-	Cmd    tea.Cmd
-	// Next is the connection to save, replacing Editing when that is set.
+	Action  DialogAction
+	Cmd     tea.Cmd
 	Next    remote.Connection
 	Editing string
 	Gen     uint64
@@ -162,17 +159,20 @@ func (d *Dialog) submit(list []remote.Connection) DialogKey {
 	return DialogKey{Action: DialogSave, Next: next, Editing: d.editing, Gen: d.gen}
 }
 
-// DialogView is the root's field layout and styles.
 type DialogView struct {
-	Field func(label, value string, focused bool) string
-	Input func(textinput.Model) string
-	Muted lipgloss.Style
+	GlyphMode presentation.GlyphMode
+	Field     func(label, value string, focused bool) string
+	Input     func(textinput.Model) string
+	Muted     lipgloss.Style
 }
 
 func (d *Dialog) View(view DialogView) uidialogs.Card {
-	title := "⇄ New SSH Connection"
+	title := "New SSH Connection"
 	if d.editing != "" {
-		title = "⇄ Edit SSH Connection"
+		title = "Edit SSH Connection"
+	}
+	if view.GlyphMode.Effective() == presentation.GlyphModeAdvanced {
+		title = presentation.GlyphsFor(view.GlyphMode).MoveGlyph + " " + title
 	}
 	body := view.Field("name", view.Input(d.name), d.focus == NameField) +
 		view.Field("ssh to", view.Input(d.destination), d.focus == DestinationField) +
@@ -180,5 +180,5 @@ func (d *Dialog) View(view DialogView) uidialogs.Card {
 		view.Muted.Render("  Its sessions show under this name. The host needs agent-manager, on") + "\n" +
 		view.Muted.Render("  its login PATH or at the binary path (/… or ~/…), and a key this") + "\n" +
 		view.Muted.Render("  machine's ssh can use without a prompt.")
-	return uidialogs.Card{Title: title, Body: body, Hints: [][2]string{{"tab/↑↓", "move"}, {"↵", "save"}, {"esc", "cancel"}}}
+	return uidialogs.Card{Title: title, Body: body, Hints: [][2]string{{presentation.NavigationLabel(view.GlyphMode, "tab/↑↓"), "move"}, {"↵", "save"}, {"esc", "cancel"}}}
 }

@@ -91,6 +91,10 @@ func TestOperationArgv(t *testing.T) {
 			_, err := c.CreateTerminal(ctx, "gpu", sessioncmd.CreateTerminalOptions{Group: &root, Directory: "/srv", Nest: &no})
 			return err
 		}, []string{"terminal", "create", "--json", "--group=", "--directory=/srv", "--nest=false"}},
+		{"terminal create named", func(ctx context.Context, c *Client) error {
+			_, err := c.CreateTerminal(ctx, "gpu", sessioncmd.CreateTerminalOptions{Name: `cu 1234 "api"`})
+			return err
+		}, []string{"terminal", "create", "--json", `--name=cu 1234 "api"`}},
 		{"terminal send command", func(ctx context.Context, c *Client) error {
 			_, err := c.TerminalSend(ctx, ref, "ls -la; echo '$x'", nil)
 			return err
@@ -106,6 +110,10 @@ func TestOperationArgv(t *testing.T) {
 			_, err := c.Kill(ctx, ref)
 			return err
 		}, []string{"kill", "--json", "--", "a1b2c3d4"}},
+		{"delete", func(ctx context.Context, c *Client) error {
+			_, err := c.Delete(ctx, ref)
+			return err
+		}, []string{"delete", "--json", "--", "a1b2c3d4"}},
 		{"revive", func(ctx context.Context, c *Client) error {
 			_, err := c.Revive(ctx, ref)
 			return err
@@ -118,6 +126,10 @@ func TestOperationArgv(t *testing.T) {
 			_, err := c.Archive(ctx, ref, true)
 			return err
 		}, []string{"archive", "--restore", "--json", "--", "a1b2c3d4"}},
+		{"move", func(ctx context.Context, c *Client) error {
+			_, err := c.Move(ctx, ref, "-team/a b")
+			return err
+		}, []string{"move", "--json", "--", "a1b2c3d4", "-team/a b"}},
 		{"create group", func(ctx context.Context, c *Client) error {
 			_, err := c.CreateGroup(ctx, "gpu", "-team/a", "/srv/team")
 			return err
@@ -166,6 +178,8 @@ func TestUnsafeIDsNeverReachSSH(t *testing.T) {
 	_, err = c.Revive(ctx, bad)
 	errs = append(errs, err)
 	_, err = c.Archive(ctx, bad, true)
+	errs = append(errs, err)
+	_, err = c.Move(ctx, bad, "work")
 	errs = append(errs, err)
 	for i, err := range errs {
 		if err == nil {
@@ -308,6 +322,9 @@ func TestUnknownCommandIsTooOldNotUnreadable(t *testing.T) {
 	}
 	if _, err := c.Type(context.Background(), Ref{Host: "gpu", ID: "a1"}, "yes"); err == nil || err.Error() != "gpu: agent-manager there is too old for SSH connections; update agent-manager on that host" {
 		t.Fatalf("type on a host that predates it = %v", err)
+	}
+	if _, err := c.Delete(context.Background(), Ref{Host: "gpu", ID: "a1"}); err == nil || err.Error() != "gpu: agent-manager there is too old for SSH connections; update agent-manager on that host" {
+		t.Fatalf("delete on a host that predates it = %v", err)
 	}
 	c = newTestClient(t, func(context.Context, []string) ([]byte, []byte, error) {
 		return []byte("closed terminal a1\n"), nil, nil

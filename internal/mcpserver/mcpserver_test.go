@@ -17,9 +17,20 @@ import (
 	"github.com/YoanWai/agent-manager/internal/report"
 	"github.com/YoanWai/agent-manager/internal/sessioncmd"
 	"github.com/YoanWai/agent-manager/internal/store"
+	"github.com/YoanWai/agent-manager/internal/testenv"
 	"github.com/YoanWai/agent-manager/internal/tmux"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// TestMain drops an inherited GIT_DIR and its siblings, which would point
+// the temp repos these tests build at the repo running them.
+func TestMain(m *testing.M) {
+	if err := testenv.IsolateGit(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 type fakeTerminalCommands struct {
 	listed      []sessioncmd.Terminal
@@ -92,8 +103,10 @@ type fakeSessionCommands struct {
 	reservations  []sessioncmd.Reservation
 	revivedID     string
 	killedID      string
+	deletedID     string
 	archivedID    string
 	archived      bool
+	movedID       string
 	endedAction   string
 	endCanceled   bool
 	groupPath     string
@@ -158,6 +171,11 @@ func (f *fakeSessionCommands) Kill(_ string, id string) (sessioncmd.Session, err
 	return f.created, f.err
 }
 
+func (f *fakeSessionCommands) Delete(_ string, id string) (sessioncmd.Deletion, error) {
+	f.deletedID = id
+	return sessioncmd.Deletion{Session: f.created}, f.err
+}
+
 // The row an archive returns carries the state it landed in, which is what
 // the front reads its verb off.
 func (f *fakeSessionCommands) Archive(_ string, id string, archived bool) (sessioncmd.Session, error) {
@@ -166,6 +184,13 @@ func (f *fakeSessionCommands) Archive(_ string, id string, archived bool) (sessi
 	updated := f.created
 	updated.Archived = archived
 	return updated, f.err
+}
+
+func (f *fakeSessionCommands) Move(_ string, id, group string) (sessioncmd.Session, error) {
+	f.movedID, f.groupPath = id, group
+	moved := f.created
+	moved.Group = group
+	return moved, f.err
 }
 
 func (f *fakeSessionCommands) EndAfterTurn(_ string, action string) (sessioncmd.AfterTurn, error) {
@@ -465,12 +490,15 @@ func TestTerminalToolsExposeStructuredResultsAndForwardArguments(t *testing.T) {
 		t.Fatalf("list text = %q", text)
 	}
 
-	created := callTool(t, session, "create_terminal", map[string]any{"group": group, "directory": "/tmp"})
+	created := callTool(t, session, "create_terminal", map[string]any{"group": group, "directory": "/tmp", "name": "cu-1234-api"})
 	if created.IsError || created.StructuredContent == nil {
 		t.Fatalf("create_terminal = %+v", created)
 	}
 	if fake.createdOpts.Group == nil || *fake.createdOpts.Group != group || fake.createdOpts.Directory != "/tmp" {
 		t.Fatalf("create args = %+v", fake.createdOpts)
+	}
+	if fake.createdOpts.Name != "cu-1234-api" {
+		t.Fatalf("create name = %q, want cu-1234-api", fake.createdOpts.Name)
 	}
 
 	if text, isError := callText(t, session, "send_terminal", map[string]any{
@@ -669,7 +697,7 @@ func TestReviewModeWritesMailbox(t *testing.T) {
 	configDir := t.TempDir()
 	session := connect(t, configDir, "abc123")
 
-	for _, scope := range []string{"uncommitted", "branch", "last_commit", "staged"} {
+	for _, scope := range []string{"uncommitted", "branch", "commit", "last_commit", "staged"} {
 		text, isError := callText(t, session, "review", map[string]any{"mode": scope})
 		if isError {
 			t.Fatalf("review mode %q error: %q", scope, text)
@@ -750,7 +778,7 @@ func TestListsFleetTools(t *testing.T) {
 	}
 	for _, want := range []string{
 		"list_sessions", "create_session", "read_session", "send_session",
-		"revive_session", "kill_session", "archive_session", "archive_self", "kill_self",
+		"revive_session", "kill_session", "delete_session", "archive_session", "move_session", "archive_self", "kill_self",
 		"list_groups", "create_group", "delete_group", "message_status", "wait_for_session",
 		"task",
 		"reserve_files", "release_files", "list_reservations",
@@ -831,12 +859,14 @@ func TestSessionDescriptionsTeachWhenAndHowToChainTools(t *testing.T) {
 		"list_sessions":    {"Call first", "create_session"},
 		"create_session":   {"without waiting for the user", "worktree", "cannot see this conversation", "read_session"},
 		"read_session":     {"after create_session", "current screen"},
-		"send_session":     {"self-contained instruction", "read_session", "at rest", "ordinary work", "eight messages"},
+		"send_session":     {"self-contained instruction", "read_session", "at rest", "ordinary work", "five messages a minute"},
 		"message_status":   {"delivered", "queued"},
 		"wait_for_session": {"instead of calling read_session in a loop", "timeout is a normal answer", "reached false"},
 		"revive_session":   {"dead session"},
 		"kill_session":     {"revive_session", "ask first", "kill_self"},
+		"delete_session":   {"worktree", "notice", "ask first", "kill_self"},
 		"archive_session":  {"archived false", "archive_self"},
+		"move_session":     {"list_groups", "create_group", "keeps running"},
 		"archive_self":     {"once the turn making this call ends", "finish your reply", "cancel true", "archive_session"},
 		"kill_self":        {"once the turn making this call ends", "finish your reply", "cancel true", "revive_session", "kill_session"},
 		"create_group":     {"list_groups", "parent"},
@@ -951,6 +981,13 @@ func TestSessionToolsExposeStructuredResultsAndForwardArguments(t *testing.T) {
 		t.Fatalf("kill id = %q", fake.killedID)
 	}
 
+	if text, isError := callText(t, session, "delete_session", map[string]any{"session_id": "a1b2c3d4"}); isError || !strings.HasPrefix(text, "deleted ") {
+		t.Fatalf("delete_session = %q, isError=%v", text, isError)
+	}
+	if fake.deletedID != "a1b2c3d4" {
+		t.Fatalf("delete id = %q", fake.deletedID)
+	}
+
 	if text, _ := callText(t, session, "archive_session", map[string]any{"session_id": "a1b2c3d4"}); !strings.Contains(text, "archived") {
 		t.Fatalf("archive text = %q", text)
 	}
@@ -962,6 +999,13 @@ func TestSessionToolsExposeStructuredResultsAndForwardArguments(t *testing.T) {
 	}
 	if fake.archived {
 		t.Fatal("archived false should restore")
+	}
+
+	if text, isError := callText(t, session, "move_session", map[string]any{"session_id": "a1b2c3d4", "group": "api/web"}); isError || !strings.Contains(text, "moved") || !strings.Contains(text, "api/web") {
+		t.Fatalf("move text = %q, error %v", text, isError)
+	}
+	if fake.movedID != "a1b2c3d4" || fake.groupPath != "api/web" {
+		t.Fatalf("move reached the layer with id %q group %q", fake.movedID, fake.groupPath)
 	}
 
 	for tool, action := range map[string]string{"archive_self": store.AfterTurnArchive, "kill_self": store.AfterTurnKill} {
@@ -1015,7 +1059,7 @@ func TestSessionToolAnnotationsDescribeLocalRisk(t *testing.T) {
 	}
 	// A rename is the change this test exists to catch, and reading the
 	// annotations off a tool that is no longer there panics the package.
-	for _, name := range []string{"list_sessions", "read_session", "list_groups", "kill_session", "kill_self", "archive_self", "create_session", "send_session"} {
+	for _, name := range []string{"list_sessions", "read_session", "list_groups", "kill_session", "delete_session", "kill_self", "archive_self", "create_session", "send_session"} {
 		if tools[name] == nil {
 			t.Fatalf("%s is not registered", name)
 		}
@@ -1028,7 +1072,7 @@ func TestSessionToolAnnotationsDescribeLocalRisk(t *testing.T) {
 			t.Fatalf("%s has no structured output schema", name)
 		}
 	}
-	for _, name := range []string{"kill_session", "kill_self", "archive_self"} {
+	for _, name := range []string{"kill_session", "delete_session", "kill_self", "archive_self"} {
 		if annotations := tools[name].Annotations; annotations == nil || annotations.DestructiveHint == nil || !*annotations.DestructiveHint {
 			t.Fatalf("%s annotations = %+v", name, annotations)
 		}
@@ -1065,6 +1109,7 @@ func TestSessionToolErrorsAreToolErrors(t *testing.T) {
 		{"list_reservations", map[string]any{}},
 		{"revive_session", map[string]any{"session_id": "a1"}},
 		{"kill_session", map[string]any{"session_id": "a1"}},
+		{"delete_session", map[string]any{"session_id": "a1"}},
 		{"archive_session", map[string]any{"session_id": "a1"}},
 		{"archive_self", map[string]any{}},
 		{"kill_self", map[string]any{"cancel": true}},
@@ -1184,7 +1229,7 @@ func TestReservationToolsReportConflictsWithoutRefusingTheLease(t *testing.T) {
 func TestReportIssuePreviewsUntilTheUserConfirms(t *testing.T) {
 	fake := &fakeReporter{
 		preview: report.Preview{ID: "3f2a91c4", Kind: report.Bug, Title: "Space lands in the wrong pane", Body: "### What happened\n\nsteps\n", Route: report.RouteGH, Account: "yoan"},
-		result:  report.Filed{Route: report.RouteGH, URL: "https://github.com/YoanWai/agent-manager/issues/512"},
+		result:  report.Filed{Route: report.RouteGH, URL: "https://github.com/wainmann/agent-manager/issues/512"},
 	}
 	session := connectServer(t, newServer(t.TempDir(), "abc123", "test", true, &fakeTerminalCommands{}, &fakeSessionCommands{}, fake))
 
@@ -1205,14 +1250,14 @@ func TestReportIssuePreviewsUntilTheUserConfirms(t *testing.T) {
 
 	args["preview_id"] = "3f2a91c4"
 	text, isError = callText(t, session, "report_issue", args)
-	if isError || text != "filed https://github.com/YoanWai/agent-manager/issues/512" {
+	if isError || text != "filed https://github.com/wainmann/agent-manager/issues/512" {
 		t.Fatalf("confirm = %q, isError=%v", text, isError)
 	}
 	if len(fake.filed) != 1 || fake.filed[0] != want || fake.approved != "3f2a91c4" {
 		t.Fatalf("confirm filed %v approved as %q", fake.filed, fake.approved)
 	}
 	structured := callTool(t, session, "report_issue", args).StructuredContent
-	if record, ok := structured.(map[string]any); !ok || record["url"] != "https://github.com/YoanWai/agent-manager/issues/512" || record["route"] != "gh" {
+	if record, ok := structured.(map[string]any); !ok || record["url"] != "https://github.com/wainmann/agent-manager/issues/512" || record["route"] != "gh" {
 		t.Fatalf("structured content = %#v", structured)
 	}
 }

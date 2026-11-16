@@ -26,7 +26,7 @@ type renameArgs struct {
 type reviewArgs struct {
 	Repo string `json:"repo,omitempty" jsonschema:"path inside the git repo or worktree being worked on, so review opens there"`
 	Base string `json:"base,omitempty" jsonschema:"git ref the branch scope diffs against (e.g. origin/develop); \"auto\" returns to auto-detection"`
-	Mode string `json:"mode,omitempty" jsonschema:"diff scope review opens with: uncommitted, branch, last_commit or staged"`
+	Mode string `json:"mode,omitempty" jsonschema:"diff scope review opens with: uncommitted, branch, commit or staged"`
 }
 
 type reviewCommentArgs struct {
@@ -41,6 +41,7 @@ type createTerminalArgs struct {
 	Directory string  `json:"directory,omitempty" jsonschema:"existing directory to open; defaults to the selected group's inherited path, then this agent's current directory"`
 	Nest      *bool   `json:"nest,omitempty" jsonschema:"when true or omitted, nest under this session, or beside it under the same parent when this session is itself a terminal; false places an un-nested terminal in group"`
 	Host      string  `json:"host,omitempty" jsonschema:"SSH connection to open the terminal on, the host list_terminals reports; omit for this machine. There it is un-nested and only this session can send to or close it; group defaults to the root and directory to the remote user's home"`
+	Name      string  `json:"name,omitempty" jsonschema:"descriptive name for the terminal, such as cu-1234-api, applied at creation; omit to name it after the session it hangs under"`
 }
 
 type sendTerminalArgs struct {
@@ -84,6 +85,11 @@ type sendSessionArgs struct {
 type archiveSessionArgs struct {
 	SessionID string `json:"session_id" jsonschema:"session id returned by list_sessions"`
 	Archived  *bool  `json:"archived,omitempty" jsonschema:"true archives the session out of the active list, false restores it; defaults to true"`
+}
+
+type moveSessionArgs struct {
+	SessionID string `json:"session_id" jsonschema:"session id returned by list_sessions"`
+	Group     string `json:"group" jsonschema:"existing group path to file it under, from list_groups; empty for the root group"`
 }
 
 type endSelfArgs struct {
@@ -196,7 +202,9 @@ type sessionCommands interface {
 	Read(sessionID, targetID string) (sessioncmd.SessionScreen, error)
 	Revive(sessionID, targetID string) (sessioncmd.Session, error)
 	Kill(sessionID, targetID string) (sessioncmd.Session, error)
+	Delete(sessionID, targetID string) (sessioncmd.Deletion, error)
 	Archive(sessionID, targetID string, archived bool) (sessioncmd.Session, error)
+	Move(sessionID, targetID, group string) (sessioncmd.Session, error)
 	EndAfterTurn(sessionID, action string) (sessioncmd.AfterTurn, error)
 	CancelAfterTurn(sessionID string) (sessioncmd.AfterTurn, error)
 	Tasks(sessionID string) ([]sessioncmd.Task, error)
@@ -307,7 +315,7 @@ func newServerWithMailbox(sessionID, version string, proactive bool, terminals t
 		Description: "Declare what the user's review screen shows for this session; set any of repo, base and mode together. " +
 			"repo is the git repo or worktree you are working in, so review opens there: declare it when you start in a repo or switch to another. " +
 			"base is the git ref your work will merge into (e.g. origin/develop), which the branch scope diffs against; \"auto\" returns to auto-detection. " +
-			"mode is the diff scope review opens with: uncommitted (working dir), branch (vs base), last_commit or staged, e.g. staged before committing.",
+			"mode is the diff scope review opens with: uncommitted (working dir), branch (vs base), commit (HEAD, the user steps to others) or staged, e.g. staged before committing.",
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args reviewArgs) (*mcp.CallToolResult, any, error) {
 		var done []string
 		if args.Repo != "" {
@@ -362,12 +370,12 @@ func newServerWithMailbox(sessionID, version string, proactive bool, terminals t
 
 	addTool(server, noCaller, &mcp.Tool{
 		Name: "list_sessions",
-		Description: "Call first whenever the work involves another agent: before delegating, before reporting what the fleet is doing, and to find the id of a session to read, prompt, revive, kill or archive. " +
+		Description: "Call first whenever the work involves another agent: before delegating, before reporting what the fleet is doing, and to find the id of a session to read, prompt, revive, kill, delete or archive. " +
 			"Lists every agent session Agent Manager knows with ids, names, CLIs, groups, directories, worktree branches, statuses (starting, working, waiting, finished, idle, errored, dead) and which row is this session. " +
 			"These are separate CLI processes running on the user's machine, each with its own context and its own conversation, and any CLI the user configured: Claude Code, Codex, Gemini and others, not only Claude. " +
 			"They are not this conversation's subagents, they outlive this conversation, and the user watches them all in one list; nothing else this session can call reports them. " +
 			"Reuse a relevant idle session instead of creating another; otherwise call create_session. " +
-			"Sessions on the user's SSH connections follow this machine's, with host set and ids written host::id, which read_session, send_session, kill_session, revive_session and archive_session take as they are.",
+			"Sessions on the user's SSH connections follow this machine's, with host set and ids written host::id, which read_session, send_session, kill_session, delete_session, revive_session, archive_session and move_session take as they are.",
 		Annotations: toolAnnotations(true, false, false),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args listSessionsArgs) (*mcp.CallToolResult, listSessionsOutput, error) {
 		listed, err := sessions.List(sessionID)
@@ -451,7 +459,7 @@ func newServerWithMailbox(sessionID, version string, proactive bool, terminals t
 			"The message is not typed in the instant you send it: Agent Manager holds it until that agent is at rest, so it can never land on an approval prompt and answer it. " +
 			"It arrives labelled as coming from another of the user's agents, and the recipient should treat it as the operator's instruction for ordinary work. Commit, push, merge, publish, and delete still wait for the user. " +
 			"Returns a message id for message_status; call read_session to see what the agent did with it. " +
-			"Refused rather than delivered: identical text to the same session inside ten minutes, more than five messages a minute from the same sender to the same recipient, more than twenty undelivered held by a recipient, more than eight messages between the same two sessions in ten minutes, or a message over 8000 bytes (point the agent at a file or a task instead). " +
+			"Refused rather than delivered: identical text to the same session inside ten minutes, more than five messages a minute from the same sender to the same recipient, more than twenty undelivered held by a recipient, or a message over 8000 bytes (point the agent at a file or a task instead). " +
 			"After a refusal, call message_status on the earlier message rather than sending again.",
 		Annotations: toolAnnotations(false, false, true),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args sendSessionArgs) (*mcp.CallToolResult, sessioncmd.SendResult, error) {
@@ -543,6 +551,7 @@ func newServerWithMailbox(sessionID, version string, proactive bool, terminals t
 		}
 		return textContent("killed " + sessioncmd.FormatSession(killed)), killed, nil
 	})
+	addDeleteSession(server, noCaller, sessionID, sessions, remotes)
 
 	addTool(server, noCaller, &mcp.Tool{
 		Name: "archive_session",
@@ -564,6 +573,24 @@ func newServerWithMailbox(sessionID, version string, proactive bool, terminals t
 			return nil, sessioncmd.Session{}, err
 		}
 		return textContent(sessioncmd.FormatArchiveState(updated)), updated, nil
+	})
+
+	addTool(server, noCaller, &mcp.Tool{
+		Name: "move_session",
+		Description: "File a session under another group, the way the user's move key does; terminals nested under it go with it. " +
+			"Use it when the user asks to file or tidy sessions into the group their work belongs to. The group must already exist: call list_groups, or create_group first. " +
+			"Only where the row is filed changes; the agent keeps running.",
+		Annotations: toolAnnotations(false, false, false),
+	}, func(ctx context.Context, req *mcp.CallToolRequest, args moveSessionArgs) (*mcp.CallToolResult, sessioncmd.Session, error) {
+		move := func() (sessioncmd.Session, error) { return sessions.Move(sessionID, args.SessionID, args.Group) }
+		if ref, ok := remote.ParseRef(args.SessionID); ok {
+			move = func() (sessioncmd.Session, error) { return remotes.move(ctx, ref, args.Group) }
+		}
+		moved, err := move()
+		if err != nil {
+			return nil, sessioncmd.Session{}, err
+		}
+		return textContent("moved " + sessioncmd.FormatSession(moved)), moved, nil
 	})
 
 	endSelf := func(action string) func(context.Context, *mcp.CallToolRequest, endSelfArgs) (*mcp.CallToolResult, sessioncmd.AfterTurn, error) {
@@ -776,6 +803,7 @@ func newServerWithMailbox(sessionID, version string, proactive bool, terminals t
 		Name: "create_terminal",
 		Description: "Create a managed terminal for human-visible work such as SSH, not for one-shot local commands or other internal work. " +
 			"It nests under this session unless nest is false, which a group other than this session's needs; a terminal created from a terminal joins it as a sibling under the same agent. The group supplies the inherited directory, and directory set explicitly wins. " +
+			"Pass a descriptive name for a long-running job, as spawn takes one, so the row reads for its work instead of the session it hangs under. " +
 			"Then call send_terminal with the returned id; use create_session instead for another agent CLI. Call close_terminal when the job is finished and the terminal is not being left for the user.",
 		Annotations: toolAnnotations(false, false, false),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, args createTerminalArgs) (*mcp.CallToolResult, sessioncmd.Terminal, error) {
@@ -783,6 +811,7 @@ func newServerWithMailbox(sessionID, version string, proactive bool, terminals t
 			Group:     args.Group,
 			Directory: args.Directory,
 			Nest:      args.Nest,
+			Name:      args.Name,
 		}
 		create := func() (sessioncmd.Terminal, error) { return terminals.Create(sessionID, opts) }
 		if args.Host != "" {

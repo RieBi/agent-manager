@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// fieldLine is a body line's field, and its list entry or -1.
 type fieldLine struct {
 	field Field
 	entry int
@@ -19,7 +18,6 @@ type fieldLine struct {
 // separator space (1).
 const LabelColumn = 16
 
-// savedListRows caps the saved prompts list under its row.
 const savedListRows = 6
 
 // FormFacts are the root facts the form paints: the width a value has,
@@ -132,26 +130,26 @@ func (d *Form) View(h FormHost, facts FormFacts) (string, [][2]string) {
 		}
 	}
 
-	hint := [][2]string{{"tab/↑↓", "move"}, {"←→", "change"}, {"↵", "create"}, {"esc", "cancel"}}
+	hint := [][2]string{{presentation.NavigationLabel(facts.Styles.GlyphMode, "tab/↑↓"), "move"}, {presentation.NavigationLabel(facts.Styles.GlyphMode, "←→"), "change"}, {"↵", "create"}, {"esc", "cancel"}}
 	switch {
 	case d.savedList.Open():
-		hint = d.savedList.Hint("use", "close")
+		hint = d.savedList.Hint("use", "close", facts.Styles.GlyphMode)
 	case d.focus == FieldSaved:
-		hint = [][2]string{{"←→", "saved prompts"}, {"ctrl+o", "list"}, {"↵", "list"}, {"esc", "cancel"}}
+		hint = [][2]string{{presentation.NavigationLabel(facts.Styles.GlyphMode, "←→"), "saved prompts"}, {"ctrl+o", "list"}, {"↵", "list"}, {"esc", "cancel"}}
 	case d.focus == FieldPrompt:
-		hint = [][2]string{{"ctrl+v", "paste an image"}, {"tab", "move"}, {"↑↓", "caret or move"}, {"↵", "create"}, {"esc", "cancel"}}
+		hint = [][2]string{{"ctrl+v", "paste an image"}, {"tab", "move"}, {presentation.NavigationLabel(facts.Styles.GlyphMode, "↑↓"), "caret or move"}, {"↵", "create"}, {"esc", "cancel"}}
 	case d.focus == FieldGroup:
-		hint = [][2]string{{"←→", "pick group"}, {"tab/↑↓", "move"}, {"↵", "create"}, {"esc", "cancel"}}
+		hint = [][2]string{{presentation.NavigationLabel(facts.Styles.GlyphMode, "←→"), "pick group"}, {presentation.NavigationLabel(facts.Styles.GlyphMode, "tab/↑↓"), "move"}, {"↵", "create"}, {"esc", "cancel"}}
 	case d.focus == FieldDir && paths.Active():
 		hint = paths.Hint()
 	case d.focus == FieldModel && ch.sugg.open:
-		hint = [][2]string{{"type", "filter"}, {"↑↓", "pick"}, {"tab", "fill in"}, {"↵", "create"}, {"esc", "close"}}
+		hint = [][2]string{{"type", "filter"}, {presentation.NavigationLabel(facts.Styles.GlyphMode, "↑↓"), "pick"}, {"tab", "fill in"}, {"↵", "create"}, {"esc", "close"}}
 	case d.focus == FieldModel:
-		hint = [][2]string{{"type", "filter"}, {"ctrl+o", "list"}, {"tab/↑↓", "move"}, {"↵", "create"}, {"esc", "cancel"}}
+		hint = [][2]string{{"type", "filter"}, {"ctrl+o", "list"}, {presentation.NavigationLabel(facts.Styles.GlyphMode, "tab/↑↓"), "move"}, {"↵", "create"}, {"esc", "cancel"}}
 	case d.focus == FieldEffort && ch.effortTyped(h, toolName):
-		hint = [][2]string{{"type", "level"}, {"tab/↑↓", "move"}, {"↵", "create"}, {"esc", "cancel"}}
+		hint = [][2]string{{"type", "level"}, {presentation.NavigationLabel(facts.Styles.GlyphMode, "tab/↑↓"), "move"}, {"↵", "create"}, {"esc", "cancel"}}
 	case d.focus == FieldEffort:
-		hint = [][2]string{{"←→", "level"}, {"tab/↑↓", "move"}, {"↵", "create"}, {"esc", "cancel"}}
+		hint = [][2]string{{presentation.NavigationLabel(facts.Styles.GlyphMode, "←→"), "level"}, {presentation.NavigationLabel(facts.Styles.GlyphMode, "tab/↑↓"), "move"}, {"↵", "create"}, {"esc", "cancel"}}
 	}
 	body := head.String() + tail.String()
 	room := facts.Height - strings.Count(strings.TrimRight(body, "\n"), "\n") - 1 - facts.Chrome(hint)
@@ -210,7 +208,6 @@ func (d *Form) savedDetails(facts FormFacts, room int) (string, presentation.Lin
 	return indent + line + "\n", lines
 }
 
-// FormField paints one labelled row of a form card.
 func FormField(st Styles, label, value string, focused bool) string {
 	marker := "  "
 	style := st.Label
