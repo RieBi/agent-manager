@@ -42,8 +42,9 @@ func piPane(t *testing.T, driver *tmux.Driver, st *store.Store, id, draft string
 	}
 }
 
-// Issue 850: pi's empty prompt in an attached session answers yes, so ←
-// goes back; a draft before the caret answers no, so ← stays the agent's.
+// Issue 850: with the arrow step set to attach, pi's empty prompt in an
+// attached session answers yes, so ← goes back; a draft before the caret
+// answers no, so ← stays the agent's. Any other value answers no.
 func TestPromptHeadReadsTheAttachedPane(t *testing.T) {
 	if _, err := exec.LookPath(tmux.Binary); err != nil {
 		t.Skip("tmux not installed")
@@ -62,6 +63,12 @@ func TestPromptHeadReadsTheAttachedPane(t *testing.T) {
 	piPane(t, driver, st, "aa01", "")
 	piPane(t, driver, st, "aa02", "draft")
 
+	if err := PromptHead(profile, driver, []string{"am_aa01"}); !errors.Is(err, ErrNotAtPromptHead) {
+		t.Fatalf("arrow step unset: %v, want ErrNotAtPromptHead", err)
+	}
+	if err := st.SetSetting(store.ArrowStepSetting, store.ArrowStepAttach); err != nil {
+		t.Fatal(err)
+	}
 	if err := PromptHead(profile, driver, []string{"am_aa01"}); err != nil {
 		t.Fatalf("pi's empty prompt: %v, want the caret at its head", err)
 	}
@@ -73,10 +80,12 @@ func TestPromptHeadReadsTheAttachedPane(t *testing.T) {
 			t.Fatalf("%s answered yes; only a managed session the store knows can", name)
 		}
 	}
-	if err := st.SetSetting(store.ArrowStepSetting, "off"); err != nil {
-		t.Fatal(err)
-	}
-	if err := PromptHead(profile, driver, []string{"am_aa01"}); !errors.Is(err, ErrNotAtPromptHead) {
-		t.Fatalf("arrow step off: %v, want ErrNotAtPromptHead", err)
+	for _, value := range []string{"on", "off"} {
+		if err := st.SetSetting(store.ArrowStepSetting, value); err != nil {
+			t.Fatal(err)
+		}
+		if err := PromptHead(profile, driver, []string{"am_aa01"}); !errors.Is(err, ErrNotAtPromptHead) {
+			t.Fatalf("arrow step %s: %v, want ErrNotAtPromptHead", value, err)
+		}
 	}
 }

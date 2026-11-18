@@ -186,6 +186,39 @@ func TestCatalogArrowRowsFollowTheSetting(t *testing.T) {
 	}
 }
 
+// The ← row names an attach only while the arrow step attaches, and the
+// → row says which way it opens a session.
+func TestCatalogArrowRowsNameTheAttachStep(t *testing.T) {
+	does := func(ctx Context, title, key string) string {
+		for _, section := range helpSections(ctx) {
+			if section.title != title {
+				continue
+			}
+			for _, row := range section.rows {
+				if row[0] == key {
+					return row[1]
+				}
+			}
+		}
+		return ""
+	}
+	const inside = "inside a session (attached or focused)"
+	ctx := testContext(84)
+	if got := does(ctx, inside, "←"); got != "focused: back to the manager, at the prompt's start" {
+		t.Errorf("focus default ← = %q", got)
+	}
+	if got := does(ctx, "list", "→"); got != "step in: focus the session, open the group" {
+		t.Errorf("focus default → = %q", got)
+	}
+	ctx.ArrowAttach = true
+	if got := does(ctx, inside, "←"); got != "focused or attached: back to the manager, at the prompt's start" {
+		t.Errorf("attach ← = %q", got)
+	}
+	if got := does(ctx, "list", "→"); got != "step in: attach to the session full screen, open the group" {
+		t.Errorf("attach → = %q", got)
+	}
+}
+
 func TestCatalogSessionRowsFollowCustomBindings(t *testing.T) {
 	rowFor := func(keys keybind.Table, key string) (string, bool) {
 		ctx := testContext(84)

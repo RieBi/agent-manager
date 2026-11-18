@@ -192,6 +192,8 @@ def seed_remote(sandbox, remote, manager):
     """The host's own fleet: an agent in its root and one in a group."""
     workdir = remote.home / 'work'
     workdir.mkdir()
+    # The host opts in to ← coming back from an attach before it has sessions.
+    remote.run(sandbox, [str(manager), 'settings', 'set', 'arrow_step_keys', 'attach'])
     remote.run(sandbox, [str(manager), 'create-group', '--json', '--', REMOTE_GROUP])
     for name, group in ((REMOTE_AGENT, ''), (GROUPED_AGENT, REMOTE_GROUP)):
         remote.run(sandbox, [str(manager), 'spawn', '--json', '--name=' + name, '--tool=' + FAKE_CLI,
@@ -329,9 +331,10 @@ def attach(sandbox, remote, agent_id):
 
 
 def left_at_prompt_head(sandbox, remote, agent_id):
-    """Issue 850: focus on a remote row opens an attach, where ← reaches the
-    agent while a draft sits before the caret and, at the head of the prompt,
-    goes back to the list the way it does in a session on this machine."""
+    """Issue 850: focus on a remote row opens an attach. With the host's ←→
+    setting on attach, ← reaches the agent while a draft sits before the caret
+    and, at the head of the prompt, goes back to the list the way it does in
+    a session on this machine."""
     pane = 'am_' + agent_id
     select_remote_agent(sandbox)
     key(sandbox, 'Enter')

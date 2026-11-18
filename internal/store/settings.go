@@ -43,14 +43,16 @@ func (s *Store) PaneSize() (int, int, error) {
 	return width, height, nil
 }
 
-// ArrowStepSetting is the beta ←→ pair, on unless set to "off". The
-// manager, the CLI and the MCP server all install the attach binding it
-// adds, so each reads it here.
+// ArrowStepSetting is the ←→ pair. Its "attach" value binds ← inside an
+// attached session. The manager, the CLI and the MCP server all install
+// that binding, so each reads it here.
 const ArrowStepSetting = "arrow_step_keys"
 
-func (s *Store) ArrowStep() (bool, error) {
+const ArrowStepAttach = "attach"
+
+func (s *Store) ArrowStepAttaches() (bool, error) {
 	value, err := s.Setting(ArrowStepSetting)
-	return value != "off", err
+	return value == ArrowStepAttach, err
 }
 
 const CoordinationSetting = "coordination"

@@ -100,8 +100,53 @@ func TestLeftAtThePromptHeadDetachesAnAttachedClient(t *testing.T) {
 	waitFor(t, "← at the prompt head to detach", func() bool { return !attached() })
 }
 
-// With the arrow step off nothing binds ←, and the footer does not name it.
-func TestLeftStaysTheAgentsWithTheArrowStepOff(t *testing.T) {
+// A CLI that splits its window (Claude Code teammates) keeps the agent in
+// pane 0. ← typed in another pane is that pane's: the check is never asked
+// about the agent's prompt, and the client stays attached.
+func TestLeftInATeammatePaneStaysInThatPane(t *testing.T) {
+	driver := requireTmux(t)
+	check, answer, asked := promptHeadStub(t)
+	driver.SetPromptHeadCheck(check)
+	t.Cleanup(func() {
+		driver.SetPromptHeadCheck("")
+		driver.EnsureBindings()
+	})
+	id := "leftmate" + strings.ReplaceAll(time.Now().Format("150405.000000"), ".", "")
+	if err := driver.Create(id, paneDir(), "sleep 300", nil, 100, 30); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	t.Cleanup(func() { driver.Kill(id) })
+	if out, err := tmuxCmd("split-window", "-t", sessionName(id), "--", "cat", "-v").CombinedOutput(); err != nil {
+		t.Fatalf("split-window: %v: %s", err, out)
+	}
+	teammate := windowTarget(id) + ".1"
+	if out, _ := tmuxCmd("display-message", "-p", "-t", sessionName(id), "#{pane_index}").Output(); strings.TrimSpace(string(out)) != "1" {
+		t.Fatalf("the teammate's pane is not the active one: %q", out)
+	}
+	press, attached := attachedClient(t, driver, id)
+
+	os.WriteFile(answer, []byte("0"), 0o644)
+	press("Left")
+	waitFor(t, "← to reach the teammate's pane", func() bool {
+		out, _ := driver.capturePlainContext(context.Background(), teammate)
+		return strings.Contains(out, "^[[D") || strings.Contains(out, "^[OD")
+	})
+	if !attached() {
+		t.Fatal("← in a teammate's pane left the session")
+	}
+	if got, err := os.ReadFile(asked); err == nil {
+		t.Fatalf("← in a teammate's pane asked about the agent's prompt in %q", got)
+	}
+
+	if out, err := tmuxCmd("select-pane", "-t", PaneTarget(id)).CombinedOutput(); err != nil {
+		t.Fatalf("select-pane: %v: %s", err, out)
+	}
+	press("Left")
+	waitFor(t, "← in the agent's own pane to detach", func() bool { return !attached() })
+}
+
+// Without the check nothing binds ←, and the footer does not name it.
+func TestLeftStaysTheAgentsWithoutTheCheck(t *testing.T) {
 	driver := requireTmux(t)
 	check, _, _ := promptHeadStub(t)
 	driver.SetPromptHeadCheck(check)
@@ -109,14 +154,14 @@ func TestLeftStaysTheAgentsWithTheArrowStepOff(t *testing.T) {
 		t.Fatalf("EnsureBindings: %v", err)
 	}
 	if _, bound := ownedRootLines(t, tmuxCmd)["Left"]; !bound {
-		t.Fatal("the arrow step on left ← unbound")
+		t.Fatal("the check left ← unbound")
 	}
 	driver.SetPromptHeadCheck("")
 	if err := driver.EnsureBindings(); err != nil {
 		t.Fatalf("EnsureBindings: %v", err)
 	}
 	if line, bound := ownedRootLines(t, tmuxCmd)["Left"]; bound {
-		t.Fatalf("the arrow step off left ← bound: %q", line)
+		t.Fatalf("no check left ← bound: %q", line)
 	}
 	id := "leftoff" + strings.ReplaceAll(time.Now().Format("150405.000000"), ".", "")
 	if err := driver.Create(id, paneDir(), "", nil, 0, 0); err != nil {
@@ -128,6 +173,6 @@ func TestLeftStaysTheAgentsWithTheArrowStepOff(t *testing.T) {
 		t.Fatalf("status-right: %v", err)
 	}
 	if strings.Contains(string(right), "←") {
-		t.Fatalf("the footer names ← with the arrow step off: %q", right)
+		t.Fatalf("the footer names ← without the check: %q", right)
 	}
 }

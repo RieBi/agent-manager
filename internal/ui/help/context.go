@@ -2,12 +2,13 @@ package help
 
 import "github.com/YoanWai/agent-manager/internal/keybind"
 
-// Tables are the copied key tables the key map lists, and whether the
-// beta ←→ pair is on.
+// Tables are the copied key tables the key map lists, whether the ←→ pair
+// is on, and whether its → attaches.
 type Tables struct {
-	Session   keybind.Table
-	List      keybind.Table
-	ArrowStep bool
+	Session     keybind.Table
+	List        keybind.Table
+	ArrowStep   bool
+	ArrowAttach bool
 }
 
 // Reads is what building the key map's context asks the root: the copied
@@ -28,6 +29,7 @@ func ContextFor(reads Reads, width int) Context {
 		SessionKeys:  tables.Session,
 		ListKeys:     tables.List,
 		ArrowStep:    tables.ArrowStep,
+		ArrowAttach:  tables.ArrowAttach,
 		Width:        width,
 		Glyphs:       reads.Glyphs(),
 		QuickKeys:    reads.QuickKeys(),

@@ -60,6 +60,7 @@ type Context struct {
 	SessionKeys  keybind.Table
 	ListKeys     keybind.Table
 	ArrowStep    bool
+	ArrowAttach  bool
 	Width        int
 	Glyphs       Glyphs
 	QuickKeys    QuickKeys

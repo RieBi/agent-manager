@@ -36,7 +36,7 @@ func (h *helpRows) fixed(key, does string) {
 	h.rows = append(h.rows, [2]string{key, does})
 }
 
-func listHelpRows(list keybind.Table, arrowStep bool, glyphs Glyphs) [][2]string {
+func listHelpRows(list keybind.Table, arrowStep, arrowAttach bool, glyphs Glyphs) [][2]string {
 	mode := glyphs.Mode
 	h := helpRows{list: list, mode: mode}
 	h.fixed("", "Tell your agent to manage sessions and terminals in Agent Manager.")
@@ -48,7 +48,11 @@ func listHelpRows(list keybind.Table, arrowStep bool, glyphs Glyphs) [][2]string
 	h.fixed("drag "+glyphs.Reorder, presentation.NavigationLabel(mode, "move the row, into another group too, or click it for ↑↓"))
 	h.fixed("click a key", "in a footer or a card's foot, run it as if typed")
 	if arrowStep {
-		h.action("step in: focus the session, open the group", keybind.StepIn)
+		stepIn := "step in: focus the session, open the group"
+		if arrowAttach {
+			stepIn = "step in: attach to the session full screen, open the group"
+		}
+		h.action(stepIn, keybind.StepIn)
 		h.action("step out: close the group", keybind.StepOut)
 	}
 	h.action("reorder the row up among its siblings", keybind.ReorderUp)
@@ -146,7 +150,7 @@ func helpSections(ctx Context) []helpSection {
 	mode := ctx.Glyphs.Mode
 	list := ctx.ListKeys
 	sections := []helpSection{
-		{title: "list", rows: listHelpRows(list, ctx.ArrowStep, ctx.Glyphs)},
+		{title: "list", rows: listHelpRows(list, ctx.ArrowStep, ctx.ArrowAttach, ctx.Glyphs)},
 		{title: "session under the cursor", rows: sessionRowHelpRows(list, mode)},
 		{title: "the mark on a session row", rows: markHelpRows(list, ctx.Glyphs)},
 		{title: "group under the cursor", rows: groupRowHelpRows(list, mode)},
@@ -167,7 +171,7 @@ func helpSections(ctx Context) []helpSection {
 			{presentation.NavigationLabel(mode, "←→"), "step over a chip as one token"},
 			{"esc", "close"},
 		}},
-		{title: "inside a session (attached or focused)", rows: sessionHelpRows(ctx.SessionKeys, ctx.ArrowStep, [][2]string{
+		{title: "inside a session (attached or focused)", rows: sessionHelpRows(ctx.SessionKeys, ctx.ArrowStep, ctx.ArrowAttach, [][2]string{
 			{"wheel", "focused: scroll the pane's history, type to catch up"},
 			{"drag", "focused: select pane text and copy it"},
 			{"click the list", "focused: back to the manager (mouse back too)"},
@@ -241,7 +245,7 @@ func formatSections(sections []helpSection, mode presentation.GlyphMode) []helpS
 	return sections
 }
 
-func sessionHelpRows(keys keybind.Table, arrowStep bool, mouseRows [][2]string, mode presentation.GlyphMode) [][2]string {
+func sessionHelpRows(keys keybind.Table, arrowStep, arrowAttach bool, mouseRows [][2]string, mode presentation.GlyphMode) [][2]string {
 	rows := [][2]string{
 		{"typing", "goes straight to the agent, q included"},
 		{"ctrl+c", "goes to the agent"},
@@ -253,7 +257,11 @@ func sessionHelpRows(keys keybind.Table, arrowStep bool, mouseRows [][2]string, 
 	}
 	rows = append(rows, [2]string{detach[0].Tea(), back})
 	if arrowStep {
-		rows = append(rows, [2]string{presentation.NavigationLabel(mode, "←"), "focused or attached: back to the manager, at the prompt's start"})
+		where := "focused"
+		if arrowAttach {
+			where = "focused or attached"
+		}
+		rows = append(rows, [2]string{presentation.NavigationLabel(mode, "←"), where + ": back to the manager, at the prompt's start"})
 	}
 	if label := keys.Binding(keybind.Review).Label(); label != "" {
 		rows = append(rows, [2]string{label, "review the session's diff, esc returns"})

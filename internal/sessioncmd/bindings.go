@@ -11,7 +11,7 @@ import (
 const PromptHeadCommand = "prompt-head"
 
 // ApplyBindingSettings sets what the in-session bindings are built from:
-// the key table, and the ← check while the arrow step is on. Every process
+// the key table, and the ← check while the arrow step attaches. Every process
 // that installs bindings reads both here, so none of them strips what
 // another put on the server.
 func ApplyBindingSettings(st *store.Store, driver *tmux.Driver) error {
@@ -19,13 +19,13 @@ func ApplyBindingSettings(st *store.Store, driver *tmux.Driver) error {
 	if err != nil {
 		return err
 	}
-	arrowStep, err := st.ArrowStep()
+	attaches, err := st.ArrowStepAttaches()
 	if err != nil {
 		return err
 	}
 	driver.SetSessionKeys(keys)
 	check := ""
-	if arrowStep {
+	if attaches {
 		check = tmux.ShellQuote(launch.Executable()) + " " + PromptHeadCommand
 	}
 	driver.SetPromptHeadCheck(check)

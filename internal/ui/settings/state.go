@@ -31,7 +31,8 @@ const (
 	BackgroundSetting = "background"
 	FocusKeySetting   = "focus_key"
 	// ArrowStepSetting is the ←→ step in/out pair: "off" turns it off,
-	// anything else leaves it on.
+	// "attach" has → attach full screen and ← come back from the attach,
+	// anything else has → focus.
 	ArrowStepSetting = "arrow_step_keys"
 	// MouseSetting is app-wide mouse reporting: "off" gives the rail and
 	// content column back to the terminal's own click-drag text selection,
@@ -102,7 +103,7 @@ type State struct {
 	ReviewScope     string
 	QuickCloseSend  bool
 	EnterFocuses    bool
-	ArrowStep       bool
+	ArrowStep       string
 	ComfortableRows bool
 	FullLayout      bool
 	HideHeader      bool
@@ -210,6 +211,7 @@ func FromSnapshot(s Snapshot) State {
 	state := State{
 		GlyphMode:   presentation.GlyphMode(value(GlyphModeSetting)),
 		ReviewScope: reviewScope(value(ReviewScopeSetting)),
+		ArrowStep:   ArrowStep(value(ArrowStepSetting)),
 		ToolNames:   names,
 		ToolIndex:   ToolIndex(names, value(DefaultToolSetting)),
 		ThemeIndex:  uitheme.Index(s.Theme),

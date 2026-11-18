@@ -251,6 +251,7 @@ func (m *Model) reconcileSettingsPrefs(restored []uisettings.Readback) string {
 func (m *Model) applySettingsPrefs(d *uisettings.State) {
 	m.prefs.glyphMode = d.GlyphMode
 	m.services.editor = d.Editor.Line()
+	m.mirrorArrowStep(d.ArrowStep)
 	for _, key := range uisettings.FlagKeys() {
 		m.mirrorFlag(key, d.Flag(key))
 	}
@@ -349,7 +350,14 @@ func (m *Model) mirrorPreference(key, value string) {
 		m.services.editor = mirrored.Editor
 	case key == uisettings.GlyphModeSetting:
 		m.prefs.glyphMode = mirrored.GlyphMode
+	case key == uisettings.ArrowStepSetting:
+		m.mirrorArrowStep(mirrored.ArrowStep)
 	}
+}
+
+func (m *Model) mirrorArrowStep(step string) {
+	m.prefs.arrowStep = step != uisettings.ArrowStepOff
+	m.prefs.arrowAttach = step == uisettings.ArrowStepAttach
 }
 
 func changesArrowStep(values []uisettings.Value) bool {
@@ -366,8 +374,6 @@ func (m *Model) mirrorFlag(key string, on bool) {
 	switch key {
 	case uisettings.FocusKeySetting:
 		m.prefs.focusOnEnter = on
-	case uisettings.ArrowStepSetting:
-		m.prefs.arrowStep = on
 	case uisettings.ListDensitySetting:
 		m.prefs.comfortableRows = on
 	case uisettings.SessionLayoutSetting:

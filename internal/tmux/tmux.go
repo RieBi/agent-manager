@@ -59,8 +59,8 @@ func (d *Driver) SetSessionKeys(keys keybind.Table) {
 
 // SetPromptHeadCheck names the command an attached ← runs to ask whether
 // the caret sits at the head of the agent's prompt; empty leaves ← to the
-// agent. The manager, the CLI and the MCP server each set it from the
-// stored arrow-step setting, since any of them reinstalls the bindings.
+// agent. The manager, the CLI and the MCP server each set it when the
+// stored arrow step attaches, since any of them reinstalls the bindings.
 func (d *Driver) SetPromptHeadCheck(command string) {
 	d.promptHead.Store(&command)
 }

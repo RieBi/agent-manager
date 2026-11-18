@@ -53,14 +53,19 @@ func rootBinding(key keybind.Key, action ...string) []string {
 	return []string{"bind-key", "-n", key.Tmux(), "if-shell", "-F", ownedBindingTest, strings.Join(action, " "), passThrough}
 }
 
+// agentPaneBindingTest holds in the agent's own pane alone. A CLI that
+// splits its window keeps the agent in pane 0 of the first window, and a
+// key typed in any other pane is that pane's.
+const agentPaneBindingTest = "#{&&:" + ownedBindingTest + ",#{&&:#{window_start_flag},#{==:#{pane_index},0}}}"
+
 // promptHeadBinding binds ← to detach when check, run in the shell with the
 // session's name after it, says the caret sits at the head of the agent's
-// prompt, and to reach the agent as itself otherwise. if-shell without -b
+// prompt, and to reach the pane as itself otherwise. if-shell without -b
 // holds the keys typed after ← until the check answers, so none of them
 // lands ahead of the ← it follows.
 func promptHeadBinding(check string) []string {
 	ask := "if-shell " + quoteCommandArg(check+" #{q:session_name}") + " detach-client 'send-keys Left'"
-	return []string{"bind-key", "-n", "Left", "if-shell", "-F", ownedBindingTest, ask, "send-keys Left"}
+	return []string{"bind-key", "-n", "Left", "if-shell", "-F", agentPaneBindingTest, ask, "send-keys Left"}
 }
 
 // quoteCommandArg quotes s as one word of a tmux command string.

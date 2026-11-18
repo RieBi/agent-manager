@@ -16,7 +16,7 @@ import (
 type helpHost struct{ *Model }
 
 func (h helpHost) KeyTables() uihelp.Tables {
-	return uihelp.Tables{Session: h.services.keys, List: h.services.listKeys, ArrowStep: h.prefs.arrowStep}
+	return uihelp.Tables{Session: h.services.keys, List: h.services.listKeys, ArrowStep: h.prefs.arrowStep, ArrowAttach: h.prefs.arrowAttach}
 }
 
 func (h helpHost) Glyphs() uihelp.Glyphs {

@@ -33,7 +33,7 @@ func PromptHead(profileDir string, driver *tmux.Driver, args []string) error {
 		return err
 	}
 	defer st.Close()
-	if on, err := st.ArrowStep(); err != nil || !on {
+	if attaches, err := st.ArrowStepAttaches(); err != nil || !attaches {
 		return errors.Join(err, ErrNotAtPromptHead)
 	}
 	sess, err := st.Get(id)
