@@ -101,13 +101,24 @@ func TestLeftAtThePromptHeadDetachesAnAttachedClient(t *testing.T) {
 	}
 	gotLeft := func(target string) func() bool {
 		return func() bool {
-			out, _ := driver.capturePlainContext(context.Background(), target)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			out, err := driver.capturePlainContext(ctx, target)
+			if err != nil {
+				t.Fatalf("capture %s: %v", target, err)
+			}
 			return strings.Contains(out, "^[[D") || strings.Contains(out, "^[OD")
+		}
+	}
+	answerWith := func(status string) {
+		t.Helper()
+		if err := os.WriteFile(answer, []byte(status), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
 	press, attached := attachedClient(t, driver, id)
 
-	os.WriteFile(answer, []byte("0"), 0o644)
+	answerWith("0")
 	press("Left")
 	waitFor(t, "← to reach the teammate's pane", gotLeft(windowTarget(id)+".1"))
 	if got, err := os.ReadFile(asked); err == nil {
@@ -117,7 +128,7 @@ func TestLeftAtThePromptHeadDetachesAnAttachedClient(t *testing.T) {
 	if out, err := tmuxCmd("select-pane", "-t", PaneTarget(id)).CombinedOutput(); err != nil {
 		t.Fatalf("select-pane: %v: %s", err, out)
 	}
-	os.WriteFile(answer, []byte("1"), 0o644)
+	answerWith("1")
 	press("Left")
 	waitFor(t, "← to reach the agent", gotLeft(PaneTarget(id)))
 	if !attached() {
@@ -127,7 +138,7 @@ func TestLeftAtThePromptHeadDetachesAnAttachedClient(t *testing.T) {
 		t.Fatalf("the check was asked about %q, want %q", got, sessionName(id))
 	}
 
-	os.WriteFile(answer, []byte("0"), 0o644)
+	answerWith("0")
 	press("Left")
 	waitFor(t, "← at the prompt head to detach", func() bool { return !attached() })
 

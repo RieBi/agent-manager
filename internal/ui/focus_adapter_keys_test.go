@@ -18,6 +18,7 @@ import (
 	focusruntime "github.com/YoanWai/agent-manager/internal/ui/focus/runtime"
 	uipreview "github.com/YoanWai/agent-manager/internal/ui/preview"
 	uicapture "github.com/YoanWai/agent-manager/internal/ui/preview/capture"
+	uilifecycle "github.com/YoanWai/agent-manager/internal/ui/session/lifecycle"
 	uisettings "github.com/YoanWai/agent-manager/internal/ui/settings"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -1409,6 +1410,9 @@ func TestArrowStepSettingAttachBindsLeftInTheSession(t *testing.T) {
 	}
 	updated, attach := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
 	*m = *updated.(*Model)
+	if request, attaching := m.effects.Main.Active.Request.(uilifecycle.AttachRequest); !attaching || request.ID != sess.ID {
+		t.Fatalf("→ queued %+v, want an attach to %s", m.effects.Main.Active.Request, sess.ID)
+	}
 	if m.foregroundTestCmd(t, attach) == nil || m.focused() {
 		t.Fatalf("→ did not open an attach, focused = %v, err = %q", m.focused(), m.errBar.text)
 	}
