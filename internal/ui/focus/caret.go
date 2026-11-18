@@ -66,9 +66,8 @@ func (m Model) CaretAtInputStart(ctx CaretContext) bool {
 	return CaretAtPromptHead(pane.Cursor, ctx.Preview, ctx.Rules)
 }
 
-// CaretAtPromptHead is the prompt-head question asked of one frame: the
-// pane's text and where tmux reports its caret. An attached client asks it
-// from the tmux binding on ←, with no focused model behind it.
+// CaretAtPromptHead is the prompt-head question asked of one frame, which
+// an attached client's ← binding asks with no focused model behind it.
 func CaretAtPromptHead(cursor Cursor, preview string, rules PromptRules) bool {
 	_, bareInput := rules.InputPrefix("")
 	caretCellKnown := cursor.Visible ||

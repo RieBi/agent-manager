@@ -36,6 +36,10 @@ const pinnedPrefixOption = "@am_pinned_prefix"
 // keys the manager bound, so the next run can take them off.
 const rootKeysOption = "@am_root_keys"
 
+// promptHeadOption is the global user option that reads 1 while the server
+// binds ← in attached sessions.
+const promptHeadOption = "@am_prompt_head"
+
 const (
 	RequestReview = "review"
 	RequestEditor = "editor"
@@ -57,10 +61,9 @@ func (d *Driver) SetSessionKeys(keys keybind.Table) {
 	d.sessionKeys.Store(&keys)
 }
 
-// SetPromptHeadCheck names the command an attached ← runs to ask whether
-// the caret sits at the head of the agent's prompt; empty leaves ← to the
-// agent. The manager, the CLI and the MCP server each set it when the
-// stored arrow step attaches, since any of them reinstalls the bindings.
+// SetPromptHeadCheck names the shell command an attached ← runs to ask
+// whether the caret sits at the head of the agent's prompt. Empty leaves ←
+// to the agent.
 func (d *Driver) SetPromptHeadCheck(command string) {
 	d.promptHead.Store(&command)
 }
@@ -70,15 +73,6 @@ func (d *Driver) promptHeadCheck() string {
 		return *command
 	}
 	return ""
-}
-
-// promptHeadBinding is the ← binding this driver installs, nil when it
-// leaves ← to the agent.
-func (d *Driver) promptHeadBinding() []string {
-	if check := d.promptHeadCheck(); check != "" {
-		return promptHeadBinding(check)
-	}
-	return nil
 }
 
 func (d *Driver) currentSessionKeys() keybind.Table {

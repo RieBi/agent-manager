@@ -19,9 +19,7 @@ func attachedClient(t *testing.T, driver *Driver, id string) (press func(key str
 	t.Helper()
 	outer := testSocket + "outer"
 	run := func(args ...string) *exec.Cmd {
-		cmd := exec.Command(Binary, append([]string{"-L", outer}, args...)...)
-		cmd.Env = commandEnv()
-		return cmd
+		return exec.Command(Binary, SocketArgs(outer, args...)...)
 	}
 	t.Cleanup(func() { run("kill-server").Run() })
 	attach := ShellQuote(driver.bin) + " -L " + testSocket + " attach-session -t " + sessionName(id)
@@ -29,7 +27,10 @@ func attachedClient(t *testing.T, driver *Driver, id string) (press func(key str
 		t.Fatalf("outer terminal: %v: %s", err, out)
 	}
 	attached = func() bool {
-		out, _ := tmuxCmd("list-clients", "-t", sessionName(id)).Output()
+		out, err := tmuxCmd("list-clients", "-t", sessionName(id)).Output()
+		if err != nil {
+			t.Fatalf("list-clients: %v", err)
+		}
 		return strings.TrimSpace(string(out)) != ""
 	}
 	waitFor(t, "the client to attach", attached)
@@ -48,10 +49,11 @@ func waitFor(t *testing.T, what string, done func() bool) {
 }
 
 // promptHeadStub stands in for the binary's prompt-head check: it records
-// the session name tmux passed and answers with the status in answer.
+// the session name tmux passed and answers with the status in answer. Its
+// path carries a quote and a #, which the binding must hand on unchanged.
 func promptHeadStub(t *testing.T) (check, answer, asked string) {
 	t.Helper()
-	dir := filepath.Join(t.TempDir(), "it's here")
+	dir := filepath.Join(t.TempDir(), "it's #here")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -64,9 +66,20 @@ func promptHeadStub(t *testing.T) (check, answer, asked string) {
 	return ShellQuote(stub) + " prompt-head", answer, asked
 }
 
-// Issue 850: an attached client, which is what focus on a remote row
-// opens, gets ← back to the list at the head of the prompt the way the
-// embedded focus view does, and keeps ← for the agent anywhere else.
+func footer(t *testing.T, id string) string {
+	t.Helper()
+	right, err := tmuxCmd("display-message", "-p", "-t", sessionName(id), "#{T:status-right}").CombinedOutput()
+	if err != nil {
+		t.Fatalf("status-right: %v: %s", err, right)
+	}
+	return string(right)
+}
+
+// Issue 850: with the check set, ← in an attached session detaches at the
+// head of the agent's prompt and reaches the agent anywhere else. A pane
+// the CLI split off (a Claude Code teammate) keeps its ← and is never
+// asked about. Without the check nothing binds ←, and the footer of a
+// session that was already running stops naming it.
 func TestLeftAtThePromptHeadDetachesAnAttachedClient(t *testing.T) {
 	driver := requireTmux(t)
 	check, answer, asked := promptHeadStub(t)
@@ -80,14 +93,33 @@ func TestLeftAtThePromptHeadDetachesAnAttachedClient(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	t.Cleanup(func() { driver.Kill(id) })
+	if !strings.Contains(footer(t, id), "← prompt start = back") {
+		t.Fatalf("the footer does not name ←: %q", footer(t, id))
+	}
+	if out, err := tmuxCmd("split-window", "-t", sessionName(id), "--", "cat", "-v").CombinedOutput(); err != nil {
+		t.Fatalf("split-window: %v: %s", err, out)
+	}
+	gotLeft := func(target string) func() bool {
+		return func() bool {
+			out, _ := driver.capturePlainContext(context.Background(), target)
+			return strings.Contains(out, "^[[D") || strings.Contains(out, "^[OD")
+		}
+	}
 	press, attached := attachedClient(t, driver, id)
 
+	os.WriteFile(answer, []byte("0"), 0o644)
+	press("Left")
+	waitFor(t, "← to reach the teammate's pane", gotLeft(windowTarget(id)+".1"))
+	if got, err := os.ReadFile(asked); err == nil {
+		t.Fatalf("← in a teammate's pane asked about the agent's prompt in %q", got)
+	}
+
+	if out, err := tmuxCmd("select-pane", "-t", PaneTarget(id)).CombinedOutput(); err != nil {
+		t.Fatalf("select-pane: %v: %s", err, out)
+	}
 	os.WriteFile(answer, []byte("1"), 0o644)
 	press("Left")
-	waitFor(t, "← to reach the agent", func() bool {
-		out, _ := driver.capturePlainContext(context.Background(), PaneTarget(id))
-		return strings.Contains(out, "^[[D") || strings.Contains(out, "^[OD")
-	})
+	waitFor(t, "← to reach the agent", gotLeft(PaneTarget(id)))
 	if !attached() {
 		t.Fatal("← left the session while the check said the caret was inside the prompt")
 	}
@@ -98,64 +130,7 @@ func TestLeftAtThePromptHeadDetachesAnAttachedClient(t *testing.T) {
 	os.WriteFile(answer, []byte("0"), 0o644)
 	press("Left")
 	waitFor(t, "← at the prompt head to detach", func() bool { return !attached() })
-}
 
-// A CLI that splits its window (Claude Code teammates) keeps the agent in
-// pane 0. ← typed in another pane is that pane's: the check is never asked
-// about the agent's prompt, and the client stays attached.
-func TestLeftInATeammatePaneStaysInThatPane(t *testing.T) {
-	driver := requireTmux(t)
-	check, answer, asked := promptHeadStub(t)
-	driver.SetPromptHeadCheck(check)
-	t.Cleanup(func() {
-		driver.SetPromptHeadCheck("")
-		driver.EnsureBindings()
-	})
-	id := "leftmate" + strings.ReplaceAll(time.Now().Format("150405.000000"), ".", "")
-	if err := driver.Create(id, paneDir(), "sleep 300", nil, 100, 30); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	t.Cleanup(func() { driver.Kill(id) })
-	if out, err := tmuxCmd("split-window", "-t", sessionName(id), "--", "cat", "-v").CombinedOutput(); err != nil {
-		t.Fatalf("split-window: %v: %s", err, out)
-	}
-	teammate := windowTarget(id) + ".1"
-	if out, _ := tmuxCmd("display-message", "-p", "-t", sessionName(id), "#{pane_index}").Output(); strings.TrimSpace(string(out)) != "1" {
-		t.Fatalf("the teammate's pane is not the active one: %q", out)
-	}
-	press, attached := attachedClient(t, driver, id)
-
-	os.WriteFile(answer, []byte("0"), 0o644)
-	press("Left")
-	waitFor(t, "← to reach the teammate's pane", func() bool {
-		out, _ := driver.capturePlainContext(context.Background(), teammate)
-		return strings.Contains(out, "^[[D") || strings.Contains(out, "^[OD")
-	})
-	if !attached() {
-		t.Fatal("← in a teammate's pane left the session")
-	}
-	if got, err := os.ReadFile(asked); err == nil {
-		t.Fatalf("← in a teammate's pane asked about the agent's prompt in %q", got)
-	}
-
-	if out, err := tmuxCmd("select-pane", "-t", PaneTarget(id)).CombinedOutput(); err != nil {
-		t.Fatalf("select-pane: %v: %s", err, out)
-	}
-	press("Left")
-	waitFor(t, "← in the agent's own pane to detach", func() bool { return !attached() })
-}
-
-// Without the check nothing binds ←, and the footer does not name it.
-func TestLeftStaysTheAgentsWithoutTheCheck(t *testing.T) {
-	driver := requireTmux(t)
-	check, _, _ := promptHeadStub(t)
-	driver.SetPromptHeadCheck(check)
-	if err := driver.EnsureBindings(); err != nil {
-		t.Fatalf("EnsureBindings: %v", err)
-	}
-	if _, bound := ownedRootLines(t, tmuxCmd)["Left"]; !bound {
-		t.Fatal("the check left ← unbound")
-	}
 	driver.SetPromptHeadCheck("")
 	if err := driver.EnsureBindings(); err != nil {
 		t.Fatalf("EnsureBindings: %v", err)
@@ -163,16 +138,7 @@ func TestLeftStaysTheAgentsWithoutTheCheck(t *testing.T) {
 	if line, bound := ownedRootLines(t, tmuxCmd)["Left"]; bound {
 		t.Fatalf("no check left ← bound: %q", line)
 	}
-	id := "leftoff" + strings.ReplaceAll(time.Now().Format("150405.000000"), ".", "")
-	if err := driver.Create(id, paneDir(), "", nil, 0, 0); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	t.Cleanup(func() { driver.Kill(id) })
-	right, err := tmuxCmd("display-message", "-p", "-t", sessionName(id), "#{T:status-right}").CombinedOutput()
-	if err != nil {
-		t.Fatalf("status-right: %v", err)
-	}
-	if strings.Contains(string(right), "←") {
-		t.Fatalf("the footer names ← without the check: %q", right)
+	if strings.Contains(footer(t, id), "←") {
+		t.Fatalf("the footer names ← without the check: %q", footer(t, id))
 	}
 }

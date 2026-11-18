@@ -79,8 +79,7 @@ func RuneAtColumn(line []rune, column int) int {
 	return len(line)
 }
 
-// PromptRules binds the engine's prompt rules to one tool, the shape the
-// arrow step's prompt-head check reads them in.
+// PromptRules binds the engine's prompt rules to one tool.
 type PromptRules struct {
 	Engine *Engine
 	Tool   string

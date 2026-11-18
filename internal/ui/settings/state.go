@@ -30,9 +30,7 @@ const (
 	// leaves the terminal's own colors, anything else paints the theme's.
 	BackgroundSetting = "background"
 	FocusKeySetting   = "focus_key"
-	// ArrowStepSetting is the ←→ step in/out pair: "off" turns it off,
-	// "attach" has → attach full screen and ← come back from the attach,
-	// anything else has → focus.
+	// ArrowStepSetting is the ←→ step in/out pair.
 	ArrowStepSetting = "arrow_step_keys"
 	// MouseSetting is app-wide mouse reporting: "off" gives the rail and
 	// content column back to the terminal's own click-drag text selection,

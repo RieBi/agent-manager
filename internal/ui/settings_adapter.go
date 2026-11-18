@@ -3,8 +3,10 @@ package ui
 import (
 	"github.com/YoanWai/agent-manager/internal/config"
 	"github.com/YoanWai/agent-manager/internal/keybind"
+	"github.com/YoanWai/agent-manager/internal/sessioncmd"
 	"github.com/YoanWai/agent-manager/internal/store"
 	"github.com/YoanWai/agent-manager/internal/systheme"
+	"github.com/YoanWai/agent-manager/internal/tmux"
 	uieffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	uiframe "github.com/YoanWai/agent-manager/internal/ui/frame"
 	uinotices "github.com/YoanWai/agent-manager/internal/ui/notices"
@@ -360,13 +362,22 @@ func (m *Model) mirrorArrowStep(step string) {
 	m.prefs.arrowAttach = step == uisettings.ArrowStepAttach
 }
 
-func changesArrowStep(values []uisettings.Value) bool {
-	for _, value := range values {
-		if value.Key == uisettings.ArrowStepSetting {
-			return true
-		}
+// bindingWriter installs the in-session bindings again once the ←→ value
+// is stored, since its attach value is what binds ← there. The save runs
+// on the effect lane, so the rebind does too.
+type bindingWriter struct {
+	uipersist.StoreWriter
+	driver *tmux.Driver
+}
+
+func (w bindingWriter) SetSetting(key, value string) error {
+	if err := w.StoreWriter.SetSetting(key, value); err != nil || key != uisettings.ArrowStepSetting {
+		return err
 	}
-	return false
+	if err := sessioncmd.ApplyBindingSettings(w.Store, w.driver); err != nil {
+		return err
+	}
+	return w.driver.EnsureBindings()
 }
 
 // mirrorFlag is the one place a two-way row meets its preferences field.

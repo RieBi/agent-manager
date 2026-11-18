@@ -44,8 +44,7 @@ func (s *Store) PaneSize() (int, int, error) {
 }
 
 // ArrowStepSetting is the ←→ pair. Its "attach" value binds ← inside an
-// attached session. The manager, the CLI and the MCP server all install
-// that binding, so each reads it here.
+// attached session, in every process that installs the bindings.
 const ArrowStepSetting = "arrow_step_keys"
 
 const ArrowStepAttach = "attach"

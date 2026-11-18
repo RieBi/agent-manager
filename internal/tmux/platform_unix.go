@@ -54,23 +54,27 @@ func rootBinding(key keybind.Key, action ...string) []string {
 }
 
 // agentPaneBindingTest holds in the agent's own pane alone. A CLI that
-// splits its window keeps the agent in pane 0 of the first window, and a
-// key typed in any other pane is that pane's.
+// splits its window keeps the agent in pane 0 of the first window.
 const agentPaneBindingTest = "#{&&:" + ownedBindingTest + ",#{&&:#{window_start_flag},#{==:#{pane_index},0}}}"
 
-// promptHeadBinding binds ← to detach when check, run in the shell with the
-// session's name after it, says the caret sits at the head of the agent's
-// prompt, and to reach the pane as itself otherwise. if-shell without -b
-// holds the keys typed after ← until the check answers, so none of them
-// lands ahead of the ← it follows.
-func promptHeadBinding(check string) []string {
-	ask := "if-shell " + quoteCommandArg(check+" #{q:session_name}") + " detach-client 'send-keys Left'"
-	return []string{"bind-key", "-n", "Left", "if-shell", "-F", agentPaneBindingTest, ask, "send-keys Left"}
-}
+// promptHeadHint names ← in a session's footer while the server binds it,
+// so a footer never outlives the binding another process took off.
+const promptHeadHint = "#{?" + promptHeadOption + ",· ← prompt start = back ,}"
 
-// quoteCommandArg quotes s as one word of a tmux command string.
-func quoteCommandArg(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+// promptHeadBinding binds ← in the agent's pane to detach when check, run
+// with the session's name after it, exits zero, and to reach the pane as
+// itself otherwise. if-shell without -b holds the keys typed after ← until
+// the check answers, so none of them lands ahead of it. # is doubled so
+// tmux expands no format out of the path to the binary.
+func promptHeadBinding(check string) [][]string {
+	if check == "" {
+		return [][]string{{"set-option", "-g", promptHeadOption, "0"}}
+	}
+	ask := "if-shell " + ShellQuote(strings.ReplaceAll(check, "#", "##")+" #{q:session_name}") + " detach-client 'send-keys Left'"
+	return [][]string{
+		{"set-option", "-g", promptHeadOption, "1"},
+		{"bind-key", "-n", "Left", "if-shell", "-F", agentPaneBindingTest, ask, "send-keys Left"},
+	}
 }
 
 // requestAction leaves the request marker and detaches, as the one command

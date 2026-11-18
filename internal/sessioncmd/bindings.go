@@ -10,9 +10,8 @@ import (
 // passes it the attached session's name.
 const PromptHeadCommand = "prompt-head"
 
-// ApplyBindingSettings sets what the in-session bindings are built from:
-// the key table, and the ← check while the arrow step attaches. Every process
-// that installs bindings reads both here, so none of them strips what
+// ApplyBindingSettings reads what the in-session bindings are built from.
+// Every process that installs them reads it here, so none strips what
 // another put on the server.
 func ApplyBindingSettings(st *store.Store, driver *tmux.Driver) error {
 	keys, err := st.SessionKeys()

@@ -1391,10 +1391,6 @@ func TestArrowStepSettingAttachBindsLeftInTheSession(t *testing.T) {
 		m.settingsCard().State().Field = uisettings.FieldArrowStep
 		m.cycleSetting(step)
 		m.handleSettingsKey(tea.KeyMsg{Type: tea.KeyEnter})
-		m.nextEffectCmd()
-		updated, rebind := m.Update(m.effects.Main.Active.Command())
-		*m = *updated.(*Model)
-		m.runBatch(t, rebind)
 		m.drainEffects(t)
 		if chosen, err := m.services.store.Setting(uisettings.ArrowStepSetting); err != nil || chosen != want {
 			t.Fatalf("the row did not persist, chosen = %q, err = %v", chosen, err)
@@ -1408,17 +1404,13 @@ func TestArrowStepSettingAttachBindsLeftInTheSession(t *testing.T) {
 	if !m.prefs.arrowStep || !m.prefs.arrowAttach {
 		t.Fatalf("attach did not reach the list, step = %v, attach = %v", m.prefs.arrowStep, m.prefs.arrowAttach)
 	}
-	if runtime.GOOS != "windows" && !leftBound() {
-		t.Fatal("saving attach left ← unbound in the session")
+	if leftBound() != (runtime.GOOS != "windows") {
+		t.Fatalf("after saving attach, ← bound = %v", leftBound())
 	}
 	updated, attach := m.handleKey(tea.KeyMsg{Type: tea.KeyRight})
-	m.drainEffects(t)
 	*m = *updated.(*Model)
-	if m.focused() {
-		t.Fatal("→ focused with the arrow step set to attach")
-	}
-	if attach == nil {
-		t.Fatalf("→ did not start an attach, err = %q", m.errBar.text)
+	if m.foregroundTestCmd(t, attach) == nil || m.focused() {
+		t.Fatalf("→ did not open an attach, focused = %v, err = %q", m.focused(), m.errBar.text)
 	}
 
 	save(-1, "on")

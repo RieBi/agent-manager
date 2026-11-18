@@ -156,8 +156,7 @@ func subcommands() map[string]func(args []string) error {
 		"follow-telemetry": withConfigDir(func(args []string, _ func() string, configDir string) error {
 			return sessioncmd.FollowTelemetry(configDir, args)
 		}),
-		// An attached ← runs this on every press, so it opens the store and
-		// tmux alone and answers with its exit status.
+		// An attached ← runs this on every press and reads its exit status.
 		sessioncmd.PromptHeadCommand: withConfigDir(func(args []string, _ func() string, configDir string) error {
 			driver, err := tmux.New()
 			if err != nil {

@@ -65,7 +65,7 @@ func (m *Model) bindEffect(request uieffects.Request) func() (uieffects.Result, 
 		}),
 		uieffects.Binder(func() uipersist.Services {
 			services := capture()
-			return uipersist.Services{Writer: uipersist.StoreWriter{Store: services.store}, Keys: services.keySaver(), Presets: services.store}
+			return uipersist.Services{Writer: bindingWriter{uipersist.StoreWriter{Store: services.store}, services.driver}, Keys: services.keySaver(), Presets: services.store}
 		}),
 		uieffects.Binder[uinotices.Services](m.noticesServices),
 		uieffects.Binder(func() onboardingruntime.Services { return onboardingruntime.Services{} }),
@@ -139,11 +139,7 @@ func (m *Model) applyEffect(job *uieffects.Job, result uieffects.Result, err err
 	case uireviewsource.Change:
 		return m.applyReviewChange(as[uireviewsource.Result](result), err)
 	case uipersist.SaveRequest:
-		cmd := m.settings.ApplySave(settingsSaveHost{m}, request, as[uipersist.SaveResult](result), err)
-		if err == nil && changesArrowStep(request.Values) {
-			return tea.Batch(m.rebindSessions, cmd)
-		}
-		return cmd
+		return m.settings.ApplySave(settingsSaveHost{m}, request, as[uipersist.SaveResult](result), err)
 	case uipersist.KeysRequest:
 		return uipersist.ApplyKeys(settingsSaveHost{m}, request, as[uipersist.KeysResult](result), err)
 	case uipersist.PromptRequest:

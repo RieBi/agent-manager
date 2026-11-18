@@ -61,7 +61,6 @@ func ArrowStep(stored string) string {
 	return arrowSteps[0]
 }
 
-// arrowStepLabel names what → does under each value.
 func arrowStepLabel(step string) string {
 	switch step {
 	case ArrowStepFocus:

@@ -139,9 +139,8 @@ type AutoScrollTick struct {
 }
 
 type KeyContext struct {
-	ListKeys  keybind.Table
-	ArrowStep bool
-	// StepInAttaches has → attach a session full screen, not focus it.
+	ListKeys       keybind.Table
+	ArrowStep      bool
 	StepInAttaches bool
 	EnterFocuses   bool
 }
