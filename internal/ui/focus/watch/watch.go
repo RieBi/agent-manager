@@ -285,12 +285,14 @@ func (w *Watcher) Forward(command string) (available bool, err error) {
 }
 
 // ForwardBlocks is Forward for a command tmux answers with several reply
-// blocks, which the client has to be told to expect.
+// blocks, which the client has to be told to expect. A client whose server
+// does not answer writes is unavailable for them, though it still serves
+// the pane's frames.
 func (w *Watcher) ForwardBlocks(command string, blocks int) (available bool, err error) {
 	w.mu.Lock()
 	control := w.control
 	w.mu.Unlock()
-	if control == nil {
+	if control == nil || !control.CarriesWrites() {
 		return false, nil
 	}
 	return true, control.SendBlocks(command, blocks)

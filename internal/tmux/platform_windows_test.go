@@ -3,6 +3,7 @@
 package tmux
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -326,4 +327,53 @@ func TestParsePsmuxVersion(t *testing.T) {
 			t.Errorf("%s: error %q does not mention %q", tc.name, err, tc.wantErr)
 		}
 	}
+}
+
+// psmux's control client serves the focused preview: it greets, a capture
+// of box-drawn lines past byte 200 comes back whole (psmux#712 left the
+// client silent there before 3.4.0), and the write probe leaves the replies
+// after it aligned whichever answer the server gives.
+func TestPsmuxControlClientServesThePane(t *testing.T) {
+	driver := requireTmux(t)
+	wide := strings.Repeat("─", 90)
+	id := psmuxSession(t, driver, "ctl", "Write-Host ([string][char]0x2500 * 90)", wide)
+	control, err := driver.OpenControl(id)
+	if err != nil {
+		t.Fatalf("OpenControl: %v", err)
+	}
+	t.Cleanup(func() { _ = control.Close() })
+	pane, err := control.Command("capture-pane -p -t " + PaneTarget(id))
+	if err != nil {
+		t.Fatalf("capture over the control client: %v", err)
+	}
+	if !strings.Contains(pane, wide) {
+		t.Fatalf("capture over the control client lost the wide line:\n%s", pane)
+	}
+	name, err := control.Command(`display-message -p -t ` + PaneTarget(id) + ` "#{session_name}"`)
+	if err != nil || strings.TrimSpace(name) != sessionName(id) {
+		t.Fatalf("session name over the control client = %q (%v), want %s", name, err, sessionName(id))
+	}
+	t.Logf("psmux answers writes over its control client: %v", control.CarriesWrites())
+}
+
+// A key the probe lets ride the control client lands from there, the way the
+// focused view types; where it does not, the forked send-keys the writer
+// falls back to still lands it.
+func TestPsmuxControlWritesFollowTheProbe(t *testing.T) {
+	driver := requireTmux(t)
+	id := psmuxSession(t, driver, "ctlw", "Write-Host ready", "ready")
+	control, err := driver.OpenControl(id)
+	if err != nil {
+		t.Fatalf("OpenControl: %v", err)
+	}
+	t.Cleanup(func() { _ = control.Close() })
+	typed := []byte("Write-Output ('ctl'+'write')\r")
+	if control.CarriesWrites() {
+		if err := control.Send(SendKeysHex(PaneTarget(id), typed)); err != nil {
+			t.Fatalf("send-keys over the control client: %v", err)
+		}
+	} else if err := driver.SendRawContext(context.Background(), SendKeysHex(PaneTarget(id), typed)); err != nil {
+		t.Fatalf("forked send-keys: %v", err)
+	}
+	waitForPaneLine(t, driver, id, "ctlwrite")
 }

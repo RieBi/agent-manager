@@ -150,6 +150,9 @@ func (w Writer) forward(request Request, blocks int) (bool, error) {
 	if w.Watch == nil || request.Command == "" {
 		return false, nil
 	}
+	if len(request.Args) > 0 && !tmux.GuardedOverControl {
+		return false, nil
+	}
 	return w.Watch.ForwardBlocks(request.Command, blocks)
 }
 
