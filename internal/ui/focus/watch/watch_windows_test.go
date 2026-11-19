@@ -87,6 +87,15 @@ func TestFocusWatchServesAPsmuxPaneOverItsControlClient(t *testing.T) {
 		t.Fatalf("watcher serves %s by polling, want its control client", id)
 	}
 	command := tmux.SendKeysHex(tmux.PaneTarget(id), []byte("Write-Output ('pushed'+'frame')\r"))
+	// A forked key lands a fork after the frames streaming meanwhile, so
+	// it is counted and no frame reads as caught up until it lands.
+	counted := watch.CountWrite(id)
+	if counted == control.CarriesWrites() {
+		t.Fatalf("CountWrite = %v with writes over the client %v, want only forked writes counted", counted, control.CarriesWrites())
+	}
+	if counted && watch.CaughtUp(0) {
+		t.Fatal("a frame from before the counted write reads as caught up")
+	}
 	available, err := watch.Forward(command)
 	if available != control.CarriesWrites() {
 		t.Fatalf("Forward available = %v, want the probe's answer %v", available, control.CarriesWrites())
@@ -100,8 +109,25 @@ func TestFocusWatchServesAPsmuxPaneOverItsControlClient(t *testing.T) {
 		}
 	}
 	watch.InputSent(id)
-	echo := waitFrame(t, frames, "pushedframe", 5*time.Second)
-	t.Logf("writes over the client: %v; typed command to its output on screen: %v", available, echo)
+	if counted {
+		watch.WriteLanded(id)
+	}
+	start := time.Now()
+	for deadline := time.After(5 * time.Second); ; {
+		select {
+		case frame := <-frames:
+			if !strings.Contains(frame.Preview, "pushedframe") {
+				continue
+			}
+			if !watch.CaughtUp(frame.Writes) {
+				t.Fatalf("the frame showing the echo is not caught up: Writes = %d", frame.Writes)
+			}
+			t.Logf("writes over the client: %v; typed command to its output on screen: %v", available, time.Since(start))
+			return
+		case <-deadline:
+			t.Fatal("no frame showing the echo within 5s")
+		}
+	}
 }
 
 // Moving focus between psmux panes opens the next pane's client at once.

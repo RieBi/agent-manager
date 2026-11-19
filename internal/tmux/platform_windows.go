@@ -128,13 +128,11 @@ const hiddenWindowStatus = "#[default]"
 // window is sized to the preview whole, the panes keeping their shares.
 const pinsSplitPane = false
 
-// controlUnavailable lets the focused preview use psmux's control client.
-// Its output thread used to slice each line at byte 200 for a debug log and
-// panic when that cut a multibyte character (psmux#712); 3.4.0, the floor
-// checkVersion enforces, cuts on a character boundary.
-func controlUnavailable() error {
-	return nil
-}
+// pollsWhenControlFails: a psmux session whose client fails to attach or
+// answer the write probe is served by forked captures, as every psmux
+// session was before 3.4.0 fixed the client's panic on wide lines
+// (psmux#712).
+const pollsWhenControlFails = true
 
 // controlFlag attaches a control-mode client. psmux's -C echoes every
 // command back; -CC answers in the plain block protocol tmux -C speaks.

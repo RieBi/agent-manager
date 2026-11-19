@@ -86,15 +86,15 @@ func enterGateContext(ctx context.Context, socket string, exclusive bool) (relea
 	}, nil
 }
 
-// ErrControlUnavailable is OpenControl's answer where the multiplexer's
-// control client cannot be relied on. It is a property of the platform,
-// not of one session, so callers poll forked captures instead of retrying.
-var ErrControlUnavailable = errors.New("control mode is not used with " + Binary)
+// ErrControlUnavailable is OpenControl's answer where a control client
+// failed to attach or answer the write probe and the platform serves the
+// session with forked captures instead (pollsWhenControlFails).
+var ErrControlUnavailable = errors.New(Binary + " control client unavailable")
 
 // OpenControl attaches a control-mode client to a live session. Gate
 // acquisition and the greeting are bounded by the same default as other tmux
-// commands. Where the multiplexer's control client cannot be relied
-// on it fails with ErrControlUnavailable.
+// commands. A failure on a platform that polls instead wraps
+// ErrControlUnavailable.
 func (d *Driver) OpenControl(id string) (*Control, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), CommandTimeout)
 	defer cancel()
@@ -103,9 +103,26 @@ func (d *Driver) OpenControl(id string) (*Control, error) {
 
 // OpenControlContext attaches a control-mode client and returns once tmux has
 // greeted it. ctx bounds only the open; a returned Control owns its process
-// until Close is called. Where the multiplexer's control client cannot be
-// relied on it fails, and callers poll captures instead.
+// until Close is called. A failure on a platform that polls instead wraps
+// ErrControlUnavailable, unless ctx ended it.
 func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, error) {
+	control, err := d.openControl(ctx, id)
+	if !pollsWhenControlFails || ctx.Err() != nil {
+		return control, err
+	}
+	if err == nil {
+		select {
+		case <-control.done:
+			// Ungreeted: the client exited before tmux spoke.
+			err = fmt.Errorf("control client exited before its greeting: %w", control.Err())
+		default:
+			return control, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: %w", ErrControlUnavailable, err)
+}
+
+func (d *Driver) openControl(ctx context.Context, id string) (*Control, error) {
 	control, err := d.attachControl(ctx, id)
 	if err != nil || !probesControlWrites {
 		return control, err
@@ -130,9 +147,6 @@ func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, e
 // attachControl starts the client and waits for its greeting under the
 // exclusive gate.
 func (d *Driver) attachControl(ctx context.Context, id string) (*Control, error) {
-	if err := controlUnavailable(); err != nil {
-		return nil, err
-	}
 	release, err := enterGateContext(ctx, d.socket, true)
 	if err != nil {
 		return nil, err
@@ -235,10 +249,10 @@ var errControlClosed = errors.New("control client closed")
 const probeMarker = "am-probe-writes"
 
 // probeWrites asks the server whether it answers a write: an empty
-// send-keys, which types nothing, then a marker. A server that answers
-// writes replies to both in order; psmux 3.4.0 gives the empty send-keys no
-// block, so the marker's reply comes first and the second waiter is
-// dropped, keeping later replies aligned.
+// send-keys -H, the form SendKeysHex forwards, which types nothing, then a
+// marker. A server that answers writes replies to both in order; psmux
+// 3.4.0 gives the empty send-keys no block, so the marker's reply comes
+// first and the second waiter is dropped, keeping later replies aligned.
 func (c *Control) probeWrites(ctx context.Context, target string) (bool, error) {
 	if c.cmd != nil {
 		release, err := enterGateContext(ctx, c.socket, false)
@@ -247,7 +261,7 @@ func (c *Control) probeWrites(ctx context.Context, target string) (bool, error) 
 		}
 		defer release()
 	}
-	waiters, err := c.submitWaiters(ctx, "send-keys -t "+target+"\ndisplay-message -p "+probeMarker, 2)
+	waiters, err := c.submitWaiters(ctx, "send-keys -t "+target+" -H\ndisplay-message -p "+probeMarker, 2)
 	if err != nil {
 		return false, err
 	}
@@ -583,9 +597,14 @@ func (c *Control) readLoop(stdout io.Reader) {
 	var block []string
 	inBlock := false
 	blockTag := ""
+	first := true
 	for scanner.Scan() {
-		// psmux -CC glues its DCS opener to the greeting; tmux -C sends none.
-		line := strings.TrimPrefix(scanner.Text(), "\x1bP1000p")
+		line := scanner.Text()
+		if first {
+			// psmux -CC glues its DCS opener to the greeting; tmux -C sends none.
+			line = strings.TrimPrefix(line, "\x1bP1000p")
+			first = false
+		}
 		switch {
 		case !inBlock && strings.HasPrefix(line, "%begin "):
 			inBlock = true

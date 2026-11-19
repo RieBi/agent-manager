@@ -24,7 +24,7 @@ func startProbe(t *testing.T) (*fakeServer, <-chan probeResult) {
 		writes, err := server.control.probeWrites(ctx, "am_x:@1.0")
 		got <- probeResult{writes, err}
 	}()
-	waitWritten(t, server, "send-keys -t am_x:@1.0\ndisplay-message -p "+probeMarker+"\n")
+	waitWritten(t, server, "send-keys -t am_x:@1.0 -H\ndisplay-message -p "+probeMarker+"\n")
 	return server, got
 }
 

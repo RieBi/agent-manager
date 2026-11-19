@@ -4,6 +4,7 @@ package tmux
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -354,6 +355,20 @@ func TestPsmuxControlClientServesThePane(t *testing.T) {
 		t.Fatalf("session name over the control client = %q (%v), want %s", name, err, sessionName(id))
 	}
 	t.Logf("psmux answers writes over its control client: %v", control.CarriesWrites())
+}
+
+// A psmux client that cannot attach reads as unavailable, so the watcher
+// polls the session instead of leaving it to the preview tick.
+func TestPsmuxControlFailureReadsAsUnavailable(t *testing.T) {
+	driver := requireTmux(t)
+	control, err := driver.OpenControl(prefixedID("ctlgone"))
+	if err == nil {
+		_ = control.Close()
+		t.Fatal("OpenControl on a missing session succeeded")
+	}
+	if !errors.Is(err, ErrControlUnavailable) {
+		t.Fatalf("OpenControl error = %v, want ErrControlUnavailable", err)
+	}
 }
 
 // A key the probe lets ride the control client lands from there, the way the

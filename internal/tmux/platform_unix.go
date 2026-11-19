@@ -25,10 +25,9 @@ const pinsSplitPane = true
 // firstWindow is the window spec for a session's first window.
 const firstWindow = "^"
 
-// controlUnavailable reports why control mode cannot be used; tmux's can.
-func controlUnavailable() error {
-	return nil
-}
+// pollsWhenControlFails: a tmux session whose client fails gets no pushed
+// frames; the preview tick still captures it.
+const pollsWhenControlFails = false
 
 // controlFlag attaches a control-mode client.
 const controlFlag = "-C"

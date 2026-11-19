@@ -72,8 +72,8 @@ func (s *State) Serving(id string) bool {
 	return s.Watch != nil && s.Watch.Serving(id)
 }
 
-// CountWrite marks one write to a polled pane, reporting whether the watcher is
-// counting and so owes an echo.
+// CountWrite marks one forked write to the watched pane, reporting whether the
+// watcher is counting and so owes an echo.
 func (s *State) CountWrite(id string) bool {
 	return s.Watch != nil && s.Watch.CountWrite(id)
 }
