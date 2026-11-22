@@ -75,7 +75,7 @@ func (s *State) Serving(id string) bool {
 // CountWrite marks one forked write to the watched pane, reporting whether the
 // watcher is counting and so owes an echo.
 func (s *State) CountWrite(request Request) bool {
-	return s.Watch != nil && s.Watch.CountWrite(request.Session.ID, request.GuardedFork())
+	return s.Watch != nil && s.Watch.CountWrite(request.Session.ID, request.Forks())
 }
 
 // CaughtUp reports whether a frame showing writes had landed after everything

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/YoanWai/agent-manager/internal/store"
+	"github.com/YoanWai/agent-manager/internal/tmux"
 	"github.com/YoanWai/agent-manager/internal/ui/focus/watch"
 )
 
@@ -36,6 +37,25 @@ func TestFrameMessageCarriesEveryPaneFact(t *testing.T) {
 	}
 	if msg.CursorX != 4 || msg.CursorY != 2 || !msg.CursorOK || !msg.PaneStateOK {
 		t.Fatalf("frame = %+v, want the cursor cell", msg)
+	}
+}
+
+// A paste forks on every platform and a guarded send forks where psmux keeps
+// it off the client, so both are counted whatever the client carries.
+func TestRequestForksFollowTheTransport(t *testing.T) {
+	t.Parallel()
+	guarded := Request{Kind: Mouse, Command: "if-shell", Args: []string{"if-shell"}}
+	for name, tc := range map[string]struct {
+		request Request
+		want    bool
+	}{
+		"paste":   {Request{Kind: Paste, Text: "x"}, true},
+		"keys":    {Request{Kind: Keys, Command: "send-keys"}, false},
+		"guarded": {guarded, !tmux.GuardedOverControl},
+	} {
+		if got := tc.request.Forks(); got != tc.want {
+			t.Errorf("%s: Forks() = %v, want %v", name, got, tc.want)
+		}
 	}
 }
 

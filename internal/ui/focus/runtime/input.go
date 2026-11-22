@@ -49,6 +49,12 @@ func (r Request) GuardedFork() bool {
 	return len(r.Args) > 0 && !tmux.GuardedOverControl
 }
 
+// Forks reports a write the writer forks whatever the watcher's client
+// carries: a paste, or a guarded send on psmux.
+func (r Request) Forks() bool {
+	return r.Kind == Paste || r.GuardedFork()
+}
+
 // Copied is the copy the effect lane keeps for itself.
 func (r Request) Copied() Request {
 	r.Args = slices.Clone(r.Args)
