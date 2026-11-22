@@ -205,10 +205,11 @@ func (w *Watcher) landedLocked(id string) {
 // land before it trusts a frame's caret, reporting whether it was counted;
 // WriteLanded must follow each counted write. Only forked writes are
 // counted: they land a fork later than the frames streaming meanwhile.
-func (w *Watcher) CountWrite(id string) bool {
+// forks marks a write that forks even where the client carries writes.
+func (w *Watcher) CountWrite(id string, forks bool) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	forked := w.polled || (w.control != nil && !w.control.CarriesWrites())
+	forked := forks || w.polled || (w.control != nil && !w.control.CarriesWrites())
 	if !forked || w.id != id {
 		return false
 	}

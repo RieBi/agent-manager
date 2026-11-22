@@ -714,17 +714,17 @@ func TestFocusWatchSkipsMissingSession(t *testing.T) {
 // can be trusted once the frame shows every counted write.
 func TestFocusWatchCountsWritesToThePolledPane(t *testing.T) {
 	watch := newTestWatcher(nil, func(any) {})
-	if watch.CountWrite("s1") {
+	if watch.CountWrite("s1", false) {
 		t.Fatal("a write was counted with no watcher polling the pane")
 	}
 	input := make(chan struct{}, 1)
 	watch.mu.Lock()
 	watch.id, watch.polled, watch.input = "s1", true, input
 	watch.mu.Unlock()
-	if watch.CountWrite("s2") {
+	if watch.CountWrite("s2", false) {
 		t.Fatal("a write to another pane was counted")
 	}
-	if !watch.CountWrite("s1") {
+	if !watch.CountWrite("s1", false) {
 		t.Fatal("a write to the polled pane was not counted")
 	}
 	if watch.CaughtUp(0) {

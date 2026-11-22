@@ -43,6 +43,12 @@ type Request struct {
 	Counted bool
 }
 
+// GuardedFork reports a guarded send the writer forks even where the
+// watcher's client carries writes.
+func (r Request) GuardedFork() bool {
+	return len(r.Args) > 0 && !tmux.GuardedOverControl
+}
+
 // Copied is the copy the effect lane keeps for itself.
 func (r Request) Copied() Request {
 	r.Args = slices.Clone(r.Args)
@@ -150,7 +156,7 @@ func (w Writer) forward(request Request, blocks int) (bool, error) {
 	if w.Watch == nil || request.Command == "" {
 		return false, nil
 	}
-	if len(request.Args) > 0 && !tmux.GuardedOverControl {
+	if request.GuardedFork() {
 		return false, nil
 	}
 	return w.Watch.ForwardBlocks(request.Command, blocks)

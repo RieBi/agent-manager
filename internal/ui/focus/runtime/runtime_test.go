@@ -3,6 +3,7 @@ package runtime
 import (
 	"testing"
 
+	"github.com/YoanWai/agent-manager/internal/store"
 	"github.com/YoanWai/agent-manager/internal/ui/focus/watch"
 )
 
@@ -43,7 +44,7 @@ func TestFrameMessageCarriesEveryPaneFact(t *testing.T) {
 func TestStateWithoutAWatchIsInert(t *testing.T) {
 	t.Parallel()
 	state := &State{}
-	if state.Ready() || state.Serving("s1") || state.CountWrite("s1") {
+	if state.Ready() || state.Serving("s1") || state.CountWrite(Request{Session: store.Session{ID: "s1"}}) {
 		t.Fatalf("a watcherless state claimed to serve a pane: %+v", state)
 	}
 	if state.Watching() != "" {

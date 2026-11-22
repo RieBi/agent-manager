@@ -87,13 +87,26 @@ func TestFocusWatchServesAPsmuxPaneOverItsControlClient(t *testing.T) {
 		t.Fatalf("watcher serves %s by polling, want its control client", id)
 	}
 	command := tmux.SendKeysHex(tmux.PaneTarget(id), []byte("Write-Output ('pushed'+'frame')\r"))
+	// A guarded send forks on psmux whatever the client carries, so it is
+	// counted on every server.
+	if !watch.CountWrite(id, true) {
+		t.Fatal("a guarded send that forks was not counted")
+	}
+	if watch.CaughtUp(0) {
+		t.Fatal("a frame from before the guarded send reads as caught up")
+	}
+	watch.WriteLanded(id)
 	// A forked key lands a fork after the frames streaming meanwhile, so
 	// it is counted and no frame reads as caught up until it lands.
-	counted := watch.CountWrite(id)
+	counted := watch.CountWrite(id, false)
+	queued := uint64(1)
+	if counted {
+		queued++
+	}
 	if counted == control.CarriesWrites() {
 		t.Fatalf("CountWrite = %v with writes over the client %v, want only forked writes counted", counted, control.CarriesWrites())
 	}
-	if counted && watch.CaughtUp(0) {
+	if counted && watch.CaughtUp(queued-1) {
 		t.Fatal("a frame from before the counted write reads as caught up")
 	}
 	available, err := watch.Forward(command)
@@ -112,20 +125,24 @@ func TestFocusWatchServesAPsmuxPaneOverItsControlClient(t *testing.T) {
 	if counted {
 		watch.WriteLanded(id)
 	}
+	// A capture can start after the key lands but before WriteLanded, and
+	// show the echo with the older count; a later frame catches up.
 	start := time.Now()
+	echoed := false
 	for deadline := time.After(5 * time.Second); ; {
 		select {
 		case frame := <-frames:
 			if !strings.Contains(frame.Preview, "pushedframe") {
 				continue
 			}
+			echoed = true
 			if !watch.CaughtUp(frame.Writes) {
-				t.Fatalf("the frame showing the echo is not caught up: Writes = %d", frame.Writes)
+				continue
 			}
 			t.Logf("writes over the client: %v; typed command to its output on screen: %v", available, time.Since(start))
 			return
 		case <-deadline:
-			t.Fatal("no frame showing the echo within 5s")
+			t.Fatalf("no caught-up frame showing the echo within 5s (echo seen: %v)", echoed)
 		}
 	}
 }
