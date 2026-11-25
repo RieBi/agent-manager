@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/YoanWai/agent-manager/internal/config"
@@ -21,6 +22,7 @@ import (
 	uiapply "github.com/YoanWai/agent-manager/internal/ui/dialogs/apply"
 	uieffects "github.com/YoanWai/agent-manager/internal/ui/effects"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestExpandForkCommandQuotesPlaceholders(t *testing.T) {
@@ -538,6 +540,31 @@ func TestForkOpencodeOpensTheCopyItsStoreMade(t *testing.T) {
 	}
 }
 
+func TestForkCaptureWaitsForArguments(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fork-args")
+		file, err := os.Create(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer file.Close()
+		const want = "/store/gemini/session-source.jsonl\n"
+		written := make(chan struct{})
+		go func() {
+			defer close(written)
+			time.Sleep(time.Millisecond)
+			if _, err := file.WriteString(want); err != nil {
+				t.Error(err)
+			}
+		}()
+		got := readWhenWritten(t, path)
+		<-written
+		if got != want {
+			t.Fatalf("fork arguments = %q, want %q", got, want)
+		}
+	})
+}
+
 // gemini forks by handing `--session-file` the source's on-disk session file;
 // gemini imports it as a brand-new conversation, so the fork launches with no
 // conversation id and the resolver's path must reach the command line intact.
@@ -604,20 +631,7 @@ func TestForkGeminiResolvesSessionFile(t *testing.T) {
 		t.Fatalf("forked AgentSessionID = %q, want empty until the gemini store captures it", forked.AgentSessionID)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	var raw []byte
-	var err error
-	for time.Now().Before(deadline) {
-		raw, err = os.ReadFile(argsFile)
-		if err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := strings.TrimSpace(string(raw)); got != sourceFile {
+	if got := strings.TrimSpace(readWhenWritten(t, argsFile)); got != sourceFile {
 		t.Fatalf("session file passed to fork = %q, want %q", got, sourceFile)
 	}
 }
@@ -1545,5 +1559,50 @@ func TestForkRefusesSourceMovedIntoArchivedGroupAfterDispatch(t *testing.T) {
 	m.applyCmd(t, cmd)
 	if _, found := forkRow(m, "child"); found {
 		t.Fatal("queued fork launched from an archived source")
+	}
+}
+
+func TestForkCardScrollsALongNameToItsCursor(t *testing.T) {
+	t.Parallel()
+	m := buildModel(t)
+	tool := m.services.cfg.Tools["claude"]
+	tool.ForkCommand = "true {id}"
+	m.services.cfg.Tools["claude"] = tool
+	long := strings.Repeat("long-name-", 15)
+	if err := m.spawnSession("claude", long, t.TempDir(), "", "", false, false, config.Choice{}); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	for i := range m.workspace.sessions {
+		m.workspace.sessions[i].AgentSessionID = "source-conversation"
+	}
+	m.rebuildRows()
+	m.selectSessionRow(t, long)
+	m.openFork()
+	if _, ok := surfaceOf[*uidialogs.ForkSurface](m); !ok {
+		t.Fatalf("fork card did not open: %q", m.errBar.text)
+	}
+	if view := preparedView(m); !strings.Contains(view, "-fork") {
+		t.Fatalf("the name's tail under the cursor is cut from the card:\n%s", view)
+	}
+	height := m.layout.height
+	m.Update(tea.WindowSizeMsg{Width: 44, Height: height})
+	if view := preparedView(m); !strings.Contains(view, "-fork") {
+		t.Fatalf("after a resize the name's tail is cut from the card:\n%s", view)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 120, Height: height})
+	m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	m.Update(tea.WindowSizeMsg{Width: 44, Height: height})
+	row := ""
+	for _, line := range strings.Split(ansi.Strip(preparedView(m)), "\n") {
+		if strings.Contains(line, "❯ name") {
+			row = line
+		}
+	}
+	if row == "" || strings.Contains(row, "…") {
+		t.Fatalf("with the cursor inside the name a resize left the field wider than the card: %q", row)
+	}
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("x")})
+	if name := openFork(m).Name(); !strings.HasPrefix(name, "xlong-name-") {
+		t.Fatalf("the resize moved the cursor off the start: %q", name)
 	}
 }

@@ -1,9 +1,11 @@
 package dialogs
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestRenameSessionCyclesToolsAndSubmits(t *testing.T) {
@@ -33,5 +35,27 @@ func TestRenameSessionKeepsAMissingTool(t *testing.T) {
 func TestRenameHints(t *testing.T) {
 	if got := RenameSession("s", "n", "zsh", []string{"zsh"}).Hints(); got[0] != [2]string{"tab", "tool: zsh"} {
 		t.Fatalf("session hints = %v", got)
+	}
+}
+
+func TestNameFieldsKeepALongName(t *testing.T) {
+	long := strings.Repeat("issue-title-", 10)
+	if got := RenameSession("s1", long, "claude", []string{"claude"}).Name(); got != long {
+		t.Fatalf("rename opened %q, want the whole name", got)
+	}
+	if got := NewGroupEdit(long, "/srv", 0, 1).Name(); got != long {
+		t.Fatalf("group edit opened %q, want the whole name", got)
+	}
+}
+
+func TestInlineRenameOpensFittedToTheRow(t *testing.T) {
+	long := strings.Repeat("issue-title-", 10)
+	d := RenameSession("s1", long, "claude", []string{"claude"})
+	view := ansi.Strip(d.NameField(20).View())
+	if got := ansi.StringWidth(view); got > 23 {
+		t.Fatalf("rename field drew %d columns in a 20 column row: %q", got, view)
+	}
+	if !strings.HasSuffix(strings.TrimRight(view, " "), "title-") {
+		t.Fatalf("rename field %q hides the end of the name, where the cursor is", view)
 	}
 }

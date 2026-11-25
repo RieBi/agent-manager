@@ -38,6 +38,9 @@ type Control struct {
 	// events coalesces %output notifications: it holds at most one signal,
 	// so a burst of pane writes reads as "something changed" once.
 	events chan struct{}
+	// clipboard holds the latest clipboard write a pane made, unread.
+	clipboard     chan ClipboardWrite
+	clipboardPane string
 	// ready closes once tmux has answered the attach with its greeting block.
 	ready chan struct{}
 	// done closes when the control client exits (detach, kill, or error).
@@ -228,6 +231,7 @@ func newControl(stdin io.WriteCloser, stdout io.Reader) *Control {
 		stdin:     stdin,
 		writeGate: make(chan struct{}, 1),
 		events:    make(chan struct{}, 1),
+		clipboard: make(chan ClipboardWrite, 1),
 		ready:     make(chan struct{}),
 		done:      make(chan struct{}),
 		reaped:    reaped,
@@ -312,6 +316,14 @@ func (c *Control) dropWaiter(waiter chan reply) {
 // Events signals whenever the session's panes produce output. Coalesced:
 // a burst of writes may arrive as a single signal.
 func (c *Control) Events() <-chan struct{} { return c.events }
+
+// WatchClipboard delivers the latest unread OSC 52 write from paneID.
+func (c *Control) WatchClipboard(paneID string) <-chan ClipboardWrite {
+	c.mu.Lock()
+	c.clipboardPane = paneID
+	c.mu.Unlock()
+	return c.clipboard
+}
 
 // Done closes when the client exits; Err then reports why.
 func (c *Control) Done() <-chan struct{} { return c.done }
@@ -599,6 +611,7 @@ func (c *Control) readLoop(stdout io.Reader) {
 	inBlock := false
 	blockTag := ""
 	first := true
+	var clipboard clipboardScanner
 	for scanner.Scan() {
 		line := scanner.Text()
 		if first {
@@ -625,11 +638,30 @@ func (c *Control) readLoop(stdout io.Reader) {
 			case c.events <- struct{}{}:
 			default:
 			}
+			pane, output, _ := strings.Cut(strings.TrimPrefix(line, "%output "), " ")
+			c.mu.Lock()
+			watchedPane := c.clipboardPane
+			c.mu.Unlock()
+			if pane != watchedPane {
+				continue
+			}
+			for _, text := range clipboard.feed(pane, unescapeOutput(output)) {
+				c.offerClipboard(ClipboardWrite{PaneID: pane, Text: text})
+			}
 		}
 		// Other notifications (%session-changed, %layout-change, %exit …)
 		// carry nothing the preview needs.
 	}
 	c.fail(scanner.Err())
+}
+
+// Only the read loop sends, so the drained slot stays free.
+func (c *Control) offerClipboard(write ClipboardWrite) {
+	select {
+	case <-c.clipboard:
+	default:
+	}
+	c.clipboard <- write
 }
 
 // blockID is the "<timestamp> <number>" pair tmux stamps on %begin and

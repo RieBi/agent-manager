@@ -199,27 +199,22 @@ func (d *Driver) runContextStarted(ctx context.Context, started func(), args ...
 		return "", err
 	}
 	defer release()
-	// tmux takes a command list in one invocation; psmux's command line
-	// reads only one command, so there each runs on its own, stopping at the
-	// first that fails the way tmux does.
 	var out bytes.Buffer
-	for i, command := range splitCommandList(args) {
-		cmd := d.commandContext(ctx, command...)
-		configureBoundedCommand(cmd)
-		cmd.Stdout = &out
-		cmd.Stderr = &out
-		if err := cmd.Start(); err != nil {
-			return "", fmt.Errorf("tmux %s: %w", strings.Join(args, " "), err)
+	cmd := d.commandContext(ctx, listArgs(args)...)
+	configureBoundedCommand(cmd)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("tmux %s: %w", strings.Join(args, " "), err)
+	}
+	if started != nil {
+		started()
+	}
+	if err := cmd.Wait(); err != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			err = contextErr
 		}
-		if started != nil && i == 0 {
-			started()
-		}
-		if err := cmd.Wait(); err != nil {
-			if contextErr := ctx.Err(); contextErr != nil {
-				err = contextErr
-			}
-			return "", fmt.Errorf("tmux %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(out.String()))
-		}
+		return "", fmt.Errorf("tmux %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(out.String()))
 	}
 	return out.String(), nil
 }
@@ -231,8 +226,7 @@ func (d *Driver) runIn(id string, args ...string) (string, error) {
 	return d.run(append(sessionRoute(id), args...)...)
 }
 
-// runInContext is runIn bounded by ctx, reporting when the first command
-// started.
+// runInContext is runIn bounded by ctx, reporting when the command started.
 func (d *Driver) runInContext(ctx context.Context, started func(), id string, args ...string) (string, error) {
 	return d.runContextStarted(ctx, started, append(sessionRoute(id), args...)...)
 }

@@ -57,7 +57,7 @@ const (
 // NewGroupForm opens the form on the name field. The path field inherits
 // dir until the user types a path of their own.
 func NewGroupForm(dir string, gen int) GroupForm {
-	name := newField("group-name", 60)
+	name := newField("group-name", 0)
 	name.Focus()
 	path := newField("default working directory", 400)
 	path.SetValue(dir)
@@ -127,10 +127,8 @@ func (d GroupForm) Width() int { return d.name.Width }
 
 // SyncWidths sizes both text fields to the card, keeping their cursors.
 func (d *GroupForm) SyncWidths(width int) {
-	d.name.Width = width
-	d.path.Width = width
-	d.name.SetCursor(d.name.Position())
-	d.path.SetCursor(d.path.Position())
+	presentation.FitInput(&d.name, width)
+	presentation.FitInput(&d.path, width)
 }
 
 type PathSuggestions interface {

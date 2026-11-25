@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"time"
+
 	"github.com/YoanWai/agent-manager/internal/config"
 	"github.com/YoanWai/agent-manager/internal/git"
 	"github.com/YoanWai/agent-manager/internal/hooks"
 	"github.com/YoanWai/agent-manager/internal/keybind"
+	"github.com/YoanWai/agent-manager/internal/lifecyclehook"
 	"github.com/YoanWai/agent-manager/internal/sessioncmd"
 	"github.com/YoanWai/agent-manager/internal/status"
 	"github.com/YoanWai/agent-manager/internal/store"
@@ -30,6 +33,9 @@ type services struct {
 	// takes the window; a seam so snapshot failures can be exercised
 	// without a broken store.
 	setSnapshot func(id, snapshot string) error
+	events      lifecyclehook.Emitter
+	// now stamps the T autorepeat window; a seam so a test owns the clock.
+	now func() time.Time
 	// quick-send seams are captured with an accepted effect. Tests use them
 	// to hold transport without blocking Bubble Tea's Update loop.
 	quickSessionExists func(*tmux.Driver, string) (bool, error)

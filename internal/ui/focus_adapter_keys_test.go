@@ -1725,10 +1725,11 @@ func TestFocusModeReadsTheSessionKeyTable(t *testing.T) {
 	t.Parallel()
 	m := buildModel(t)
 	useSessionKeys(t, m, []string{"f9"}, nil, []string{"f3"})
+	waitForCat := readyCat(t, m, "control-echo", "-v")
 	createSessionOn(t, m, "remapped", "control-echo", t.TempDir())
 	m.selectSessionRow(t, "remapped")
 	sess := railSelectedSession(m)
-	waitForPaneChild(t, m, sess.ID, "cat")
+	waitForCat(sess.ID)
 
 	updated, _ := m.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 	*m = *updated.(*Model)
