@@ -486,7 +486,7 @@ func (m *Model) applySpawn(request uilaunch.Request, result uilaunch.Result, err
 	request.Dir = result.Dir
 	request.Worktree = result.Worktree
 	if request.Kind == uilaunch.Shell {
-		m.ledger.lifecycle.TerminalKeyAt = time.Now()
+		m.ledger.lifecycle.TerminalKeyAt = m.services.now()
 		m.reportErr(err.Error())
 		return nil
 	}
@@ -558,7 +558,7 @@ func (m *Model) commitSpawn(request uilaunch.Request, sess store.Session) {
 		m.focusSession(sess.ID)
 	}
 	if request.Kind == uilaunch.Shell {
-		m.ledger.lifecycle.TerminalKeyAt = time.Now()
+		m.ledger.lifecycle.TerminalKeyAt = m.services.now()
 	}
 }
 
