@@ -4,6 +4,7 @@ package watch
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,36 +27,6 @@ func psmuxPane(t *testing.T, driver *tmux.Driver, prefix string) string {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("pane %s never printed ready: %q", id, pane)
-		}
-	}
-}
-
-// framesOf collects the frames pushed for id.
-func framesOf(id string) (chan Frame, func(any)) {
-	frames := make(chan Frame, 1024)
-	return frames, func(msg any) {
-		if frame, ok := msg.(Frame); ok && frame.SessionID == id {
-			select {
-			case frames <- frame:
-			default:
-			}
-		}
-	}
-}
-
-func waitFrame(t *testing.T, frames <-chan Frame, contains string, within time.Duration) time.Duration {
-	t.Helper()
-	start := time.Now()
-	deadline := time.After(within)
-	for {
-		select {
-		case frame := <-frames:
-			if strings.Contains(frame.Preview, contains) {
-				return time.Since(start)
-			}
-		case <-deadline:
-			t.Fatalf("no frame showing %q within %v", contains, within)
-			return 0
 		}
 	}
 }
@@ -143,6 +114,66 @@ func TestFocusWatchServesAPsmuxPaneOverItsControlClient(t *testing.T) {
 			return
 		case <-deadline:
 			t.Fatalf("no caught-up frame showing the echo within 5s (echo seen: %v)", echoed)
+		}
+	}
+}
+
+// A forked write that lands after the psmux pane last painted still gets a
+// frame that shows it, so the caret is trusted again.
+func TestFocusWatchCapturesAWriteLandingOnAQuietPsmuxPane(t *testing.T) {
+	driver := requireDriver(t)
+	id := psmuxPane(t, driver, "psquiet")
+	frames, send := framesOf(id)
+	watch := newTestWatcher(driver, send)
+	t.Cleanup(watch.Close)
+	watch.Pace(true)
+	watch.SetFocus(id)
+	waitServing(t, watch, id)
+	watch.mu.Lock()
+	control := watch.control
+	watch.mu.Unlock()
+	if control == nil {
+		t.Fatalf("watcher serves %s by polling, want its control client", id)
+	}
+	waitFrame(t, frames, "ready", 10*time.Second)
+	requireLandedWriteCaptured(t, watch, id, frames)
+}
+
+// A has-session that fails without saying the session is gone, as one that
+// runs out its budget does, does not read as a missing session: the watcher
+// still opens the session's client.
+func TestFocusWatchOpensAfterAnUnansweredHasSession(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "attached")
+	// An exit /b inside the for block reaches the caller as 0, so each
+	// answer exits from a label.
+	script := "@echo off\r\n" +
+		"for %%a in (%*) do (\r\n" +
+		"  if \"%%~a\"==\"-V\" goto version\r\n" +
+		"  if \"%%~a\"==\"has-session\" goto busy\r\n" +
+		"  if \"%%~a\"==\"attach-session\" goto attach\r\n" +
+		")\r\n" +
+		"exit /b 1\r\n" +
+		":version\r\necho psmux 3.4.0\r\nexit /b 0\r\n" +
+		":busy\r\necho server busy 1>&2\r\nexit /b 2\r\n" +
+		":attach\r\ntype nul > \"" + marker + "\"\r\nexit /b 1\r\n"
+	if err := os.WriteFile(filepath.Join(dir, "psmux.bat"), []byte(script), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	driver, err := tmux.NewWithSocket("focus-watch-unanswered")
+	if err != nil {
+		t.Fatal(err)
+	}
+	watch := newTestWatcher(driver, func(any) {})
+	t.Cleanup(watch.Close)
+	watch.SetFocus("fixture")
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(marker); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the watcher never opened a client after has-session failed")
 		}
 	}
 }

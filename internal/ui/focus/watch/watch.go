@@ -217,11 +217,17 @@ func (w *Watcher) CountWrite(id string, forks bool) bool {
 	return true
 }
 
+// WriteLanded wakes the watcher whatever pane it now serves: the counts
+// span panes, so a landing after focus moved decides whether the new pane's
+// frames have caught up.
 func (w *Watcher) WriteLanded(id string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.landed++
-	w.landedLocked(id)
+	select {
+	case w.input <- struct{}{}:
+	default:
+	}
 }
 
 // CaughtUp reports whether a frame taken once writes of the counted writes
@@ -388,9 +394,11 @@ func (w *Watcher) RetryNow() {
 
 func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, input chan struct{}) {
 	openCtx, cancelOpen := context.WithTimeout(ctx, controlOpenTimeout)
-	exists := w.driver.ExistsContext(openCtx, id)
+	exists, existsErr := w.driver.SessionExistsContext(openCtx, id)
 	cancelOpen()
-	if !exists {
+	// A has-session that failed, as one past its budget does, does not say
+	// the session is gone: the open decides, and on psmux polls if it fails.
+	if !exists && existsErr == nil {
 		w.clearIfCurrent(id, stop)
 		return
 	}
@@ -432,10 +440,13 @@ func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, in
 		w.mu.Unlock()
 	}()
 	target := tmux.PaneTarget(id)
+	// shown is the landed count the last frame was taken with.
+	var shown uint64
 	capture := func() (string, bool) {
 		w.mu.Lock()
 		landed := w.landed
 		w.mu.Unlock()
+		shown = landed
 		callCtx, cancelCall := context.WithTimeout(ctx, controlCallTimeout)
 		pane, err := control.CommandContext(callCtx, "capture-pane -p -e -t "+target)
 		cancelCall()
@@ -496,7 +507,15 @@ func (w *Watcher) watch(ctx context.Context, id string, stop <-chan struct{}, in
 		case <-control.Events():
 		case <-input:
 			inputUntil = time.Now().Add(frameBudget)
-			continue
+			// A forked write can land after the frame that shows its echo,
+			// and a quiet pane paints nothing more, so that frame would never
+			// catch up.
+			w.mu.Lock()
+			behind := w.landed != shown
+			w.mu.Unlock()
+			if !behind {
+				continue
+			}
 		}
 		// Echo may arrive after a streaming paint or a cursor-only update.
 		captureAt := due()

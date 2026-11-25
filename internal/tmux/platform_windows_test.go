@@ -371,6 +371,44 @@ func TestPsmuxControlFailureReadsAsUnavailable(t *testing.T) {
 	}
 }
 
+// An open that runs out its deadline reads as unavailable like any other
+// failed open, so the watcher polls; one its caller cancelled does not.
+func TestPsmuxControlOpenTimeoutReadsAsUnavailable(t *testing.T) {
+	driver := requireTmux(t)
+	id := psmuxSession(t, driver, "ctlslow", "Write-Host ready", "ready")
+	// A psmux spawn alone outlasts 20 ms, so the deadline runs out inside
+	// the attach.
+	short, cancelShort := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelShort()
+	control, err := driver.OpenControlContext(short, id)
+	if err == nil {
+		_ = control.Close()
+		t.Skip("psmux greeted within 20 ms")
+	}
+	if !errors.Is(err, ErrControlUnavailable) {
+		t.Fatalf("timed-out open error = %v, want ErrControlUnavailable", err)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		attached, err := driver.Display(id, "#{session_attached}")
+		if err == nil && strings.TrimSpace(attached) == "0" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the timed-out client still attached: %q (%v)", strings.TrimSpace(attached), err)
+		}
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	control, err = driver.OpenControlContext(cancelled, id)
+	if err == nil {
+		_ = control.Close()
+		t.Fatal("OpenControlContext after cancel succeeded")
+	}
+	if errors.Is(err, ErrControlUnavailable) {
+		t.Fatalf("cancelled open error = %v, want it not to read as unavailable", err)
+	}
+}
+
 // A key the probe lets ride the control client lands from there, the way the
 // focused view types; where it does not, the forked send-keys the writer
 // falls back to still lands it.

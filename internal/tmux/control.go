@@ -104,10 +104,11 @@ func (d *Driver) OpenControl(id string) (*Control, error) {
 // OpenControlContext attaches a control-mode client and returns once tmux has
 // greeted it. ctx bounds only the open; a returned Control owns its process
 // until Close is called. A failure on a platform that polls instead wraps
-// ErrControlUnavailable, unless ctx ended it.
+// ErrControlUnavailable, an open that ran out its deadline included, unless
+// the caller cancelled ctx.
 func (d *Driver) OpenControlContext(ctx context.Context, id string) (*Control, error) {
 	control, err := d.openControl(ctx, id)
-	if !pollsWhenControlFails || ctx.Err() != nil {
+	if !pollsWhenControlFails || errors.Is(ctx.Err(), context.Canceled) {
 		return control, err
 	}
 	if err == nil {
